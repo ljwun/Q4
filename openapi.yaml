@@ -1,0 +1,406 @@
+openapi: 3.0.3
+info:
+  title: Auction API
+  version: 1.0.0
+  description: API for managing and participating in an auction system.
+tags:
+  - name: Auction
+    description: Endpoints for managing auction items, bidding, and tracking auction events.
+  - name: Authentication
+    description: Endpoints for user authentication and authorization.
+
+components:
+  schemas:
+    ApiResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+    BidEvent:
+      type: object
+      properties:
+        user:
+          type: string
+        bid:
+          type: integer
+        time:
+          type: string
+          format: date-time
+
+  securitySchemes:
+    defaultOath2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://sso.yyuk-dev.link/application/o/authorize/
+          tokenUrl: https://sso.yyuk-dev.link/application/o/token/
+          scopes:
+            read: email openid profile
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+paths:
+  /auction/item:
+    post:
+      summary: Add a new auction item
+      tags:
+        - Auction
+      description: Create a new auction item.
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Item created successfully.
+        '400':
+          description: Invalid data provided.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+        '401':
+          description: Unauthorized access.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                  format: byte
+                startingPrice:
+                  type: integer
+                  format: int64
+                startTime:
+                  type: string
+                  format: date-time
+                endTime:
+                  type: string
+                  format: date-time
+              required:
+                - name
+                - startingPrice
+                - endTime
+  /auction/items:
+    get:
+      summary: List auction items
+      tags:
+        - Auction
+      description: Retrieve auction items with optional filters and sorting.
+      parameters:
+        - name: name
+          in: query
+          description: Search term for filtering items.
+          required: false
+          schema:
+            type: string
+        - name: startPrice
+          in: query
+          description: Starting price range for filtering items.
+          required: false
+          schema:
+            type: object
+            properties:
+              from:
+                type: integer
+              to:
+                type: integer
+        - name: currentBid
+          in: query
+          description: Current bid range for filtering items.
+          required: false
+          schema:
+            type: object
+            properties:
+              from:
+                type: integer
+              to:
+                type: integer
+        - name: startTime
+          in: query
+          description: The auction start time range for filtering items.
+          required: false
+          schema:
+            type: object
+            properties:
+              from:
+                type: string
+                format: date-time
+              to:
+                type: string
+                format: date-time
+        - name: endTime
+          in: query
+          description: The auction end time range for filtering items.
+          required: false
+          schema:
+            type: object
+            properties:
+              from:
+                type: string
+                format: date-time
+              to:
+                type: string
+                format: date-time
+        - name: sort
+          in: query
+          description: Sort criteria.
+          required: false
+          schema:
+            type: object
+            properties:
+              key:
+                type: string
+                enum:
+                  - name
+                  - startPrice
+                  - currentBid
+                  - startTime
+                  - endTime
+              order:
+                type: string
+                enum:
+                  - asc
+                  - desc
+      responses:
+        '200':
+          description: Successful retrieval of items.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        name:
+                          type: string
+                        currentBid:
+                          type: number
+                        startTime:
+                          type: string
+                          format: data-time
+                        endTime:
+                          type: string
+                          format: date-time
+        '400':
+          description: Missing parameters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+        '404':
+          description: No items found.
+  /auction/item/{itemID}:
+    get:
+      summary: Get auction item details
+      tags:
+        - Auction
+      description: Retrieve details of a specific auction item.
+      parameters:
+        - name: itemID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful retrieval of item details.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  description:
+                    type: string
+                  startPrice:
+                    type: integer
+                  currentBid:
+                    type: integer
+                  bidRecord:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        user:
+                          type: string
+                        bid:
+                          type: integer
+                        time:
+                          type: string
+                          format: date-time
+                  startTime:
+                    type: string
+                    format: date-time
+                  endTime:
+                    type: string
+                    format: date-time
+        '404':
+          description: Item not found.
+  /auction/item/{itemID}/events:
+    get:
+      summary: Track auction item events
+      tags:
+        - Auction
+      description: Stream bidding events for a specific auction item using SSE.
+      parameters:
+        - name: itemID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful connection to SSE stream.
+        '404':
+          description: Item not found.
+  /auction/item/{itemID}/bids:
+    post:
+      summary: Place a bid on an auction item
+      tags:
+        - Auction
+      description: Submit a bid for a specific auction item.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: itemID
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bid:
+                  type: number
+              required:
+                - bid
+      responses:
+        '200':
+          description: Bid placed successfully.
+        '400':
+          description: Bid too low.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        '401':
+          description: Unauthorized access.
+        '403':
+          description: Auction not started yet.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        '404':
+          description: Item not found.
+        '410':
+          description: Auction has ended.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+  /auth/token:
+    post:
+      summary: Obtain authentication token
+      tags: 
+        - Authentication
+      description: Exchange authorization code and redirect URL for an access token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                authorization_code:
+                  type: string
+                redirect_url:
+                  type: string
+              required:
+                - authorization_code
+                - redirect_url
+      responses:
+        '200':
+          description: Token issued successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                  id_token:
+                    type: string
+        '400':
+          description: Missing parameters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+        '401':
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+    delete:
+      summary: Revoke authentication token
+      tags: 
+        - Authentication
+      description: Revoke access token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                access_token:
+                  type: string
+              required:
+                - access_token
+      responses:
+        '200':
+          description: Token revoked successfully.
+        '400':
+          description: Missing parameters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+        '404':
+          description: Revoke failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
