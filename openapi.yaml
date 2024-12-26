@@ -190,10 +190,10 @@ paths:
                         name:
                           type: string
                         currentBid:
-                          type: number
+                          type: integer
                         startTime:
                           type: string
-                          format: data-time
+                          format: date-time
                         endTime:
                           type: string
                           format: date-time
@@ -329,78 +329,150 @@ paths:
                 properties:
                   message:
                     type: string
-  /auth/token:
-    post:
-      summary: Obtain authentication token
+  /auth/login:
+    get:
+      summary: Obtain authentication url
       tags: 
         - Authentication
-      description: Exchange authorization code and redirect URL for an access token.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                authorization_code:
-                  type: string
-                redirect_url:
-                  type: string
-              required:
-                - authorization_code
-                - redirect_url
+      description: Obtain authentication url and redirect.
+      parameters:
+        - name: redirect_url
+          in: query
+          description: Url to back after finishing authorization.
+          required: true
+          schema:
+            type: string
+            format: uri
       responses:
-        '200':
+        '307':
           description: Token issued successfully.
-          content:
-            application/json:
+          headers:
+            Location:
+              description: The location of the login page of authentication server.
               schema:
-                type: object
-                properties:
-                  access_token:
-                    type: string
-                  id_token:
-                    type: string
+                type: string
+                format: uri
         '400':
-          description: Missing parameters.
+          description: Missing redirect_url parameter.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiResponse"
-        '401':
-          description: Authentication failed.
+  /auth/callback:
+    get:
+      summary: Exchange authorization code
+      tags: 
+        - Authentication
+      description: Exchange authorization code to finish authentication flow and redirect to origin page.
+      parameters:
+        - name: code
+          in: query
+          description: Authorization code.
+          required: true
+          schema:
+            type: string
+        - name: state
+          in: query
+          description: Authorization state.
+          required: true
+          schema:
+            type: string
+        - name: redirect_url
+          in: query
+          description: Url to back after finishing authorization.
+          required: true
+          schema:
+            type: string
+            format: uri
+      responses:
+        '307':
+          description: Authentication successfully.
+          headers:
+            Location:
+              description: The location of the origin page before login.
+              schema:
+                type: string
+                format: uri
+            Set-Cookie-Access-Token:
+              description: "Add access token into secure http only cookie."
+              schema:
+                type: string
+                format: JWT
+                example: "Set-Cookie accessToken=xxx.xxx.xxx; HttpOnly; Secure; Max-Age=3600"
+            Set-Cookie-Username:
+              description: "Add username into secure cookie."
+              schema:
+                type: string
+                example: "username=XXXX; Secure; Max-Age=3600"
+        '400':
+          description: Missing redirect_url parameter.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiResponse"
-    delete:
+  /auth/logout:
+    get:
       summary: Revoke authentication token
       tags: 
         - Authentication
       description: Revoke access token.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                access_token:
-                  type: string
-              required:
-                - access_token
+      parameters:
+        - name: access_token
+          in: cookie
+          description: access token for current user.
+          required: true
+          schema:
+            type: string
+            example: xxx.xxxxxx.xxxxx
       responses:
         '200':
           description: Token revoked successfully.
+          headers:
+            Set-Cookie-Access-Token:
+              description: "Remove access token from secure http only cookie."
+              schema:
+                type: string
+                format: JWT
+                example: "accessToken=; HttpOnly; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
+            Set-Cookie-Username:
+              description: "Remove username from secure cookie."
+              schema:
+                type: string
+                example: "username=; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
         '400':
-          description: Missing parameters.
+          description: Missing access token.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiResponse"
-        '404':
-          description: Revoke failed.
-          content:
-            application/json:
+  /auth/test:
+    get:
+      summary: Test available of access token
+      tags:
+        - Authentication
+      description: Check user's access token is available or not.
+      parameters:
+        - name: access_token
+          in: cookie
+          description: access token for current user.
+          required: true
+          schema:
+            type: string
+            example: xxx.xxxxxx.xxxxx
+      responses:
+        '200':
+          description: Token is available.
+        '401':
+          description: Token is unavailable.
+          headers:
+            Set-Cookie-Access-Token:
+              description: "Remove access token from secure http only cookie."
               schema:
-                $ref: "#/components/schemas/ApiResponse"
+                type: string
+                format: JWT
+                example: "accessToken=; HttpOnly; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
+            Set-Cookie1-Username:
+              description: "Remove username from secure cookie."
+              schema:
+                type: string
+                example: "username=; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
