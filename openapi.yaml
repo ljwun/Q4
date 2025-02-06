@@ -8,6 +8,8 @@ tags:
     description: Endpoints for managing auction items, bidding, and tracking auction events.
   - name: Authentication
     description: Endpoints for user authentication and authorization.
+  - name: Image
+    description: Endpoints for managing images.
 
 components:
   schemas:
@@ -26,23 +28,14 @@ components:
           type: string
         bid:
           type: integer
+          format: uint32
         time:
           type: string
           format: date-time
-
-  securitySchemes:
-    defaultOath2:
-      type: oauth2
-      flows:
-        authorizationCode:
-          authorizationUrl: https://sso.yyuk-dev.link/application/o/authorize/
-          tokenUrl: https://sso.yyuk-dev.link/application/o/token/
-          scopes:
-            read: email openid profile
-    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
+      required:
+        - user
+        - bid
+        - time
 
 paths:
   /auction/item:
@@ -51,11 +44,23 @@ paths:
       tags:
         - Auction
       description: Create a new auction item.
-      security:
-        - bearerAuth: []
+      parameters:
+        - name: accessToken
+          in: cookie
+          description: access token for current user.
+          required: false
+          schema:
+            type: string
+            example: xxx.xxxxxx.xxxxx
       responses:
         '201':
           description: Item created successfully.
+          headers:
+            Location:
+              description: The location of the created item.
+              schema:
+                type: string
+                format: uri
         '400':
           description: Invalid data provided.
           content:
@@ -71,11 +76,10 @@ paths:
             schema:
               type: object
               properties:
-                name:
+                title:
                   type: string
                 description:
                   type: string
-                  format: byte
                 startingPrice:
                   type: integer
                   format: int64
@@ -85,9 +89,13 @@ paths:
                 endTime:
                   type: string
                   format: date-time
+                carousels:
+                  type: array
+                  items:
+                    type: string
+                    format: uri
               required:
-                - name
-                - startingPrice
+                - title
                 - endTime
   /auction/items:
     get:
@@ -96,7 +104,7 @@ paths:
         - Auction
       description: Retrieve auction items with optional filters and sorting.
       parameters:
-        - name: name
+        - name: title
           in: query
           description: Search term for filtering items.
           required: false
@@ -104,6 +112,7 @@ paths:
             type: string
         - name: startPrice
           in: query
+          style: deepObject
           description: Starting price range for filtering items.
           required: false
           schema:
@@ -115,6 +124,7 @@ paths:
                 type: integer
         - name: currentBid
           in: query
+          style: deepObject
           description: Current bid range for filtering items.
           required: false
           schema:
@@ -126,6 +136,7 @@ paths:
                 type: integer
         - name: startTime
           in: query
+          style: deepObject
           description: The auction start time range for filtering items.
           required: false
           schema:
@@ -139,6 +150,7 @@ paths:
                 format: date-time
         - name: endTime
           in: query
+          style: deepObject
           description: The auction end time range for filtering items.
           required: false
           schema:
@@ -152,6 +164,7 @@ paths:
                 format: date-time
         - name: sort
           in: query
+          style: deepObject
           description: Sort criteria.
           required: false
           schema:
@@ -160,16 +173,40 @@ paths:
               key:
                 type: string
                 enum:
-                  - name
+                  - title
                   - startPrice
                   - currentBid
                   - startTime
                   - endTime
+                default: title
               order:
                 type: string
                 enum:
                   - asc
                   - desc
+                default: asc
+        - name: lastItemID
+          in: query
+          description: The last item ID of the previous page.
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name:  size
+          in: query
+          description: The maximum number of items to return.
+          required: false
+          schema:
+            type: integer
+            format: uint32
+            default: 1
+        - name:  excludeEnded
+          in: query
+          description: Exclude ended items.
+          required: false
+          schema:
+            type: boolean
+            default: false
       responses:
         '200':
           description: Successful retrieval of items.
@@ -187,16 +224,30 @@ paths:
                       properties:
                         id:
                           type: string
-                        name:
+                          format: uuid
+                        title:
                           type: string
                         currentBid:
                           type: integer
+                          format: uint32
                         startTime:
                           type: string
                           format: date-time
                         endTime:
                           type: string
                           format: date-time
+                        isEnded:
+                          type: boolean
+                      required:
+                        - id
+                        - title
+                        - currentBid
+                        - startTime
+                        - endTime
+                        - isEnded
+                required:
+                  - count
+                  - items
         '400':
           description: Missing parameters.
           content:
@@ -217,6 +268,7 @@ paths:
           required: true
           schema:
             type: string
+            format: uuid
       responses:
         '200':
           description: Successful retrieval of item details.
@@ -225,32 +277,37 @@ paths:
               schema:
                 type: object
                 properties:
-                  name:
+                  title:
                     type: string
                   description:
                     type: string
                   startPrice:
                     type: integer
-                  currentBid:
-                    type: integer
-                  bidRecord:
+                    format: int64
+                  bidRecords:
                     type: array
                     items:
-                      type: object
-                      properties:
-                        user:
-                          type: string
-                        bid:
-                          type: integer
-                        time:
-                          type: string
-                          format: date-time
+                      $ref: "#/components/schemas/BidEvent"
                   startTime:
                     type: string
                     format: date-time
                   endTime:
                     type: string
                     format: date-time
+                  carousels:
+                    type: array
+                    items:
+                      type: string
+                      format: uri
+                required:
+                  - title
+                  - description
+                  - startPrice
+                  - bidRecords
+                  - currentBid
+                  - startTime
+                  - endTime
+                  - carousels
         '404':
           description: Item not found.
   /auction/item/{itemID}/events:
@@ -265,11 +322,30 @@ paths:
           required: true
           schema:
             type: string
+            format: uuid
       responses:
         '200':
           description: Successful connection to SSE stream.
+        '403':
+          description: Auction not started yet.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
         '404':
           description: Item not found.
+        '410':
+          description: Auction has ended.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
   /auction/item/{itemID}/bids:
     post:
       summary: Place a bid on an auction item
@@ -284,6 +360,14 @@ paths:
           required: true
           schema:
             type: string
+            format: uuid
+        - name: accessToken
+          in: cookie
+          description: access token for current user.
+          required: false
+          schema:
+            type: string
+            example: xxx.xxxxxx.xxxxx
       requestBody:
         required: true
         content:
@@ -292,7 +376,8 @@ paths:
               type: object
               properties:
                 bid:
-                  type: number
+                  type: integer
+                  format: uint32
               required:
                 - bid
       responses:
@@ -344,20 +429,24 @@ paths:
             type: string
             format: uri
       responses:
-        '307':
+        '200':
           description: Token issued successfully.
           headers:
+            Set-Cookie|requestState|HttpOnly;Secure;Max-Age=120:
+              description: "Add authentication state into secure http only cookie."
+              schema:
+                type: string
+                example: "Set-Cookie state=xxx.xxx.xxx; HttpOnly; Secure; Max-Age=3600"
+            Set-Cookie|requestNonce|HttpOnly;Secure;Max-Age=120:
+              description: "Add authentication nonce into secure http only cookie."
+              schema:
+                type: string
+                example: "Set-Cookie nonce=xxx.xxx.xxx; HttpOnly; Secure; Max-Age=3600"
             Location:
               description: The location of the login page of authentication server.
               schema:
                 type: string
                 format: uri
-        '400':
-          description: Missing redirect_url parameter.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiResponse"
   /auth/callback:
     get:
       summary: Exchange authorization code
@@ -365,6 +454,20 @@ paths:
         - Authentication
       description: Exchange authorization code to finish authentication flow and redirect to origin page.
       parameters:
+        - name: requestState
+          in: cookie
+          description: Stored authentication state.
+          required: false
+          schema:
+            type: string
+            example: st_xxxxxxxxxx
+        - name: requestNonce
+          in: cookie
+          description: Stored authentication nonce.
+          required: false
+          schema:
+            type: string
+            example: n_xxxxxxxxxx
         - name: code
           in: query
           description: Authorization code.
@@ -385,7 +488,7 @@ paths:
             type: string
             format: uri
       responses:
-        '307':
+        '200':
           description: Authentication successfully.
           headers:
             Location:
@@ -393,23 +496,27 @@ paths:
               schema:
                 type: string
                 format: uri
-            Set-Cookie-Access-Token:
+            Unset-Cookie|requestState|HttpOnly;Secure:
+              description: "Remove authentication state from secure http only cookie."
+              schema:
+                type: string
+                example: "Set-Cookie state=; HttpOnly; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
+            Unset-Cookie|requestNonce|HttpOnly;Secure:
+              description: "Remove authentication nonce from secure http only cookie."
+              schema:
+                type: string
+                example: "Set-Cookie nonce=; HttpOnly; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
+            Set-Cookie|accessToken|HttpOnly;Secure;Max-Age=10800:
               description: "Add access token into secure http only cookie."
               schema:
                 type: string
                 format: JWT
                 example: "Set-Cookie accessToken=xxx.xxx.xxx; HttpOnly; Secure; Max-Age=3600"
-            Set-Cookie-Username:
+            Set-Cookie|username|Max-Age=10800:
               description: "Add username into secure cookie."
               schema:
                 type: string
                 example: "username=XXXX; Secure; Max-Age=3600"
-        '400':
-          description: Missing redirect_url parameter.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiResponse"
   /auth/logout:
     get:
       summary: Revoke authentication token
@@ -417,62 +524,70 @@ paths:
         - Authentication
       description: Revoke access token.
       parameters:
-        - name: access_token
+        - name: accessToken
           in: cookie
           description: access token for current user.
-          required: true
+          required: false
           schema:
             type: string
             example: xxx.xxxxxx.xxxxx
+        - name: username
+          in: cookie
+          description: name for current user.
+          required: false
+          schema:
+            type: string
+            example: xxxxxxx
       responses:
         '200':
           description: Token revoked successfully.
           headers:
-            Set-Cookie-Access-Token:
+            Unset-Cookie|accessToken|HttpOnly;Secure:
               description: "Remove access token from secure http only cookie."
               schema:
                 type: string
                 format: JWT
                 example: "accessToken=; HttpOnly; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
-            Set-Cookie-Username:
+            Unset-Cookie|username|HttpOnly;Secure:
               description: "Remove username from secure cookie."
               schema:
                 type: string
-                example: "username=; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
+                example: "username=; HttpOnly; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
+  /image:
+    post:
+      summary: Upload an image
+      tags:
+        - Image
+      description: Upload an image file.
+      parameters:
+        - name: accessToken
+          in: cookie
+          description: access token for current user.
+          required: false
+          schema:
+            type: string
+            example: xxx.xxxxxx.xxxxx
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '201':
+          description: Image uploaded successfully.
+          headers:
+            Location:
+              description: The location of the uploaded image.
+              schema:
+                type: string
+                format: uri
         '400':
-          description: Missing access token.
+          description: Invalid data provided.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiResponse"
-  /auth/test:
-    get:
-      summary: Test available of access token
-      tags:
-        - Authentication
-      description: Check user's access token is available or not.
-      parameters:
-        - name: access_token
-          in: cookie
-          description: access token for current user.
-          required: true
-          schema:
-            type: string
-            example: xxx.xxxxxx.xxxxx
-      responses:
-        '200':
-          description: Token is available.
         '401':
-          description: Token is unavailable.
-          headers:
-            Set-Cookie-Access-Token:
-              description: "Remove access token from secure http only cookie."
-              schema:
-                type: string
-                format: JWT
-                example: "accessToken=; HttpOnly; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
-            Set-Cookie1-Username:
-              description: "Remove username from secure cookie."
-              schema:
-                type: string
-                example: "username=; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
+          description: Unauthorized access.
