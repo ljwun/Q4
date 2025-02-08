@@ -23,6 +23,7 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"gorm.io/gorm/schema"
 
 	"q4/adapters/oidc"
 	internalS3 "q4/adapters/s3"
@@ -65,7 +66,12 @@ func NewServer(config ServerConfig) (openapi.StrictServerInterface, error) {
 
 	// 初始化資料庫連線
 	dsn := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable&search_path=%s", config.DB.User, config.DB.Password, config.DB.Host, config.DB.Port, config.DB.Database, config.DB.Schema)
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{TranslateError: true})
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+		TranslateError: true,
+		NamingStrategy: schema.NamingStrategy{
+			TablePrefix: config.DB.Schema + ".",
+		},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("[%s] Fail to connect to database, err=%w", op, err)
 	}
