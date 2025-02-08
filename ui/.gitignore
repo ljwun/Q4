@@ -1,0 +1,13 @@
+# next.js
+.next/
+out/
+
+# production
+build/
+
+# debug
+npm-debug.log*
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
