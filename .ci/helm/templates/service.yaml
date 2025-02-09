@@ -12,4 +12,3 @@ spec:
     - name: ui
       protocol: TCP
       port: {{ .Values.ui.port }}
-  type: NodePort
