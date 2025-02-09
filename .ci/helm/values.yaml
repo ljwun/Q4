@@ -1,0 +1,142 @@
+# values.yaml
+# -----------------------------------------------------------------------------
+# This file contains default values for the Q4 Helm chart.
+# You can override these values by providing your own values.yaml file
+# when installing the chart.
+#
+# For example:
+#   helm install q4 ./q4 --values my-values.yaml
+#
+# Alternatively, you can set individual parameters on the command line:
+#   helm install q4 ./q4 --set api.image=my-q4-api:latest
+
+# Global settings
+global:
+  # 副本數
+  replicas: 1
+  # 是否啟用 Gateway。如果啟用，將會建立 Ingress 資源。
+  gatewayEnabled: true
+  # Gateway 的主機名稱。
+  hostname: ""
+  # Gateway 的命名空間。
+  gatewayNamespace: ""
+  # Gateway 的名稱。
+  gatewayName: ""
+  # Gateway 的 sectionName。
+  gatewaySectionName: ""
+
+# API settings
+api:
+  # API 的 Docker 镜像。
+  image: ghcr.io/ljwun/q4-api:latest
+  # 服務端口
+  port: 8080
+  # oidc設定，必填
+  oidc:
+    issuerUrl:
+      value: ""
+      configMapName: ""
+      secretName: ""
+      key: ""
+    clientId:
+      value: ""
+      configMapName: ""
+      secretName: ""
+      key: ""
+    clientSecret:
+      value: ""
+      configMapName: ""
+      secretName: ""
+      key: ""
+  # S3 設定，必填
+  s3:
+    endpoint:
+      value: ""
+      configMapName: ""
+      secretName: ""
+      key: ""
+    bucket:
+      value: ""
+      configMapName: ""
+      secretName: ""
+      key: ""
+    publicBaseUrl:
+      value: ""
+      configMapName: ""
+      secretName: ""
+      key: ""
+    accessKeyId:
+      value: ""
+      configMapName: ""
+      secretName: ""
+      key: ""
+    secretAccessKey:
+      value: ""
+      configMapName: ""
+      secretName: ""
+      key: ""
+  # Database 設定，必填
+  db:
+    user:
+      value: ""
+      configMapName: ""
+      secretName: ""
+      key: ""
+    password:
+      value: ""
+      configMapName: ""
+      secretName: ""
+      key: ""
+    host:
+      value: ""
+      configMapName: ""
+      secretName: ""
+      key: ""
+    port:
+      value: ""
+      configMapName: ""
+      secretName: ""
+      key: ""
+    database:
+      value: ""
+      configMapName: ""
+      secretName: ""
+      key: ""
+    schema:
+      value: ""
+      configMapName: ""
+      secretName: ""
+      key: ""
+  # 資源限制和請求
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+# UI settings
+ui:
+  # UI 的 Docker 镜像。
+  image: ghcr.io/ljwun/q4-ui:latest
+  # 服務端口
+  port: 3000
+  nodeEnv:
+    value: "development"
+    configMapName: ""
+    secretName: ""
+    key: ""
+  frontendBaseUrl:
+    value: ""
+    configMapName: ""
+    secretName: ""
+    key: ""
+  # 資源限制和請求
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-service
+spec:
+  selector:
+    app: q4-app
+  ports:
+    - name: api
+      protocol: TCP
+      port: {{ .Values.api.port }}
+    - name: ui
+      protocol: TCP
+      port: {{ .Values.ui.port }}
+  type: NodePort

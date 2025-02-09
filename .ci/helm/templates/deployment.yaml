@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-app
+  labels:
+    app: q4-app
+spec:
+  replicas: {{ .Values.global.replicas }}
+  selector:
+    matchLabels:
+      app: q4-app
+  template:
+    metadata:
+      labels:
+        app: q4-app
+    spec:
+      containers:
+        - name: q4-api
+          image: {{ .Values.api.image }}
+          ports:
+            - containerPort: {{ .Values.api.port }}
+          resources:
+            {{- tpl (toYaml .Values.api.resources) . | nindent 12 }}
+          env:
+            # General
+            - name: Q4_SERVER_URL
+              value: "0.0.0.0:{{ .Values.api.port }}"
+            
+            # OIDC settings
+            {{- include "utils.envValue" (dict "name" "Q4_OIDC_ISSUER_URL" "data" .Values.api.oidc.issuerUrl "required" true) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_OIDC_CLIENT_ID" "data" .Values.api.oidc.clientId "required" true) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_OIDC_CLIENT_SECRET" "data" .Values.api.oidc.clientSecret "required" true) | nindent 12 }}
+
+            # S3 settings
+            {{- include "utils.envValue" (dict "name" "Q4_S3_ENDPOINT" "data" .Values.api.s3.endpoint "required" true) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_S3_BUCKET" "data" .Values.api.s3.bucket "required" true) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_S3_PUBLIC_BASE_URL" "data" .Values.api.s3.publicBaseUrl "required" true) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_S3_ACCESS_KEY_ID" "data" .Values.api.s3.accessKeyId "required" true) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_S3_SECRET_ACCESS_KEY" "data" .Values.api.s3.secretAccessKey "required" true) | nindent 12 }}
+
+            # Database settings
+            {{- include "utils.envValue" (dict "name" "Q4_DB_USER" "data" .Values.api.db.user "required" true) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_DB_PASSWORD" "data" .Values.api.db.password "required" true) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_DB_HOST" "data" .Values.api.db.host "required" true) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_DB_PORT" "data" .Values.api.db.port "required" true) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_DB_DATABASE" "data" .Values.api.db.database "required" true) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_DB_SCHEMA" "data" .Values.api.db.schema "required" true) | nindent 12 }}
+
+        - name: q4-ui
+          image: {{ .Values.ui.image }}
+          ports:
+            - containerPort: {{ .Values.ui.port }}
+          resources:
+            {{- tpl (toYaml .Values.ui.resources) . | nindent 12 }}
+          env:
+            # 我們不需要由Next.js代理API請求，因為API和UI都是由同一個gateway來處理
+            # 因此不需要設定Q4_BACKEND_BASE_URL
+            - name: HOSTNAME
+              value: "0.0.0.0"
+            - name: PORT
+              value: {{ .Values.ui.port | quote }}
+            {{- include "utils.envValue" (dict "name" "NODE_ENV" "data" .Values.ui.nodeEnv) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_FRONTEND_BASE_URL" "data" .Values.ui.frontendBaseUrl "required" true) | nindent 12 }}
+          
+          
