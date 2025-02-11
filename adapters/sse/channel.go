@@ -7,32 +7,34 @@ import (
 // Channel 用於管理針對某個主題 (Topic) 的所有訂閱者，
 // 並將接收到的訊息廣播給所有訂閱者。
 type Channel[T any] struct {
-	subscribers map[chan T]struct{}
+	subscribers map[<-chan T]chan<- T
 	mu          sync.RWMutex
 }
 
 // NewChannel creates a new SSE channel.
 func NewChannel[T any]() *Channel[T] {
 	return &Channel[T]{
-		subscribers: make(map[chan T]struct{}),
+		subscribers: make(map[<-chan T]chan<- T),
 	}
 }
 
-// Subscribe 建立一個新的 chan T，將其加入 subscribers，並回傳給呼叫者。
-func (c *Channel[T]) Subscribe() chan T {
+// Subscribe 建立一個新的 chan T，將其加入 subscribers，並回傳唯讀通道給呼叫者。
+func (c *Channel[T]) Subscribe() <-chan T {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	newCh := make(chan T)
-	c.subscribers[newCh] = struct{}{}
-	return newCh
+	ch := make(chan T)
+	c.subscribers[ch] = ch
+	return ch
 }
 
-// Unsubscribe 從 subscribers 中移除指定的 chan T，並關閉該通道。
-func (c *Channel[T]) Unsubscribe(ch chan T) {
+// Unsubscribe 從 subscribers 中移除指定的通道，並關閉該通道。
+func (c *Channel[T]) Unsubscribe(ch <-chan T) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	delete(c.subscribers, ch)
-	close(ch)
+	if writeCh, exists := c.subscribers[ch]; exists {
+		delete(c.subscribers, ch)
+		close(writeCh)
+	}
 }
 
 // UnsubscribeAll 關閉所有訂閱者的通道並清空訂閱清單。
@@ -40,11 +42,9 @@ func (c *Channel[T]) UnsubscribeAll() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// 關閉所有訂閱者的通道
-	for ch := range c.subscribers {
-		close(ch)
+	for _, writeCh := range c.subscribers {
+		close(writeCh)
 	}
-	// 清空訂閱清單
 	clear(c.subscribers)
 }
 
@@ -52,8 +52,8 @@ func (c *Channel[T]) UnsubscribeAll() {
 func (c *Channel[T]) Broadcast(message T) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	for ch := range c.subscribers {
-		ch <- message
+	for _, writeCh := range c.subscribers {
+		writeCh <- message
 	}
 }
 

@@ -40,7 +40,7 @@ func TestChannel_UnsubscribeAll(t *testing.T) {
 	ch := sse.NewChannel[Message]()
 
 	// 建立多個訂閱者
-	subs := make([]chan Message, 3)
+	subs := make([]<-chan Message, 3)
 	for i := range subs {
 		subs[i] = ch.Subscribe()
 	}

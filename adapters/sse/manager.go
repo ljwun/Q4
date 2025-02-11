@@ -82,8 +82,8 @@ func (cm *connectionManager[T]) Done() {
 
 // Subscribe 訂閱指定的頻道。
 // channelName: 要訂閱的頻道名稱
-// 返回: 用於接收訊息的通道，以及可能的錯誤
-func (cm *connectionManager[T]) Subscribe(channelName string) (chan T, error) {
+// 返回: 用於接收訊息的唯讀通道，以及可能的錯誤
+func (cm *connectionManager[T]) Subscribe(channelName string) (<-chan T, error) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -117,8 +117,7 @@ func (cm *connectionManager[T]) Publish(channelName string, data T) error {
 }
 
 // Unsubscribe 取消訂閱指定的頻道。
-// 如果頻道沒有任何訂閱者，會自動釋放該頻道的資源。
-func (cm *connectionManager[T]) Unsubscribe(channelName string, ch chan T) {
+func (cm *connectionManager[T]) Unsubscribe(channelName string, ch <-chan T) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 

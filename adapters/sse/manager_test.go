@@ -71,7 +71,7 @@ func TestConnectionManager(t *testing.T) {
 		err := cm.Publish("test_channel", msg)
 		require.NoError(t, err)
 
-		for i, ch := range []chan Message{ch1, ch2} {
+		for i, ch := range []<-chan Message{ch1, ch2} {
 			select {
 			case received := <-ch:
 				assert.Equal(t, msg, received, "subscriber %d", i+1)

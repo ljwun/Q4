@@ -15,9 +15,9 @@ type ConnectionManager[T any] interface {
 	// Done 停止 ConnectionManager，釋放所有資源。
 	Done()
 	// Subscribe 註冊並訂閱指定頻道，返回一個新的 chan Message。
-	Subscribe(channelName string) (chan T, error)
+	Subscribe(channelName string) (<-chan T, error)
 	// Publish 將資料推送到指定頻道。
 	Publish(channelName string, data T) error
 	// Unsubscribe 取消訂閱指定頻道。
-	Unsubscribe(channelName string, ch chan T)
+	Unsubscribe(channelName string, ch <-chan T)
 }
