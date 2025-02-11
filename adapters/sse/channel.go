@@ -35,6 +35,19 @@ func (c *Channel[T]) Unsubscribe(ch chan T) {
 	close(ch)
 }
 
+// UnsubscribeAll 關閉所有訂閱者的通道並清空訂閱清單。
+func (c *Channel[T]) UnsubscribeAll() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// 關閉所有訂閱者的通道
+	for ch := range c.subscribers {
+		close(ch)
+	}
+	// 清空訂閱清單
+	clear(c.subscribers)
+}
+
 // Broadcast 將訊息廣播給所有仍在訂閱清單中的通道。
 func (c *Channel[T]) Broadcast(message T) {
 	c.mu.RLock()

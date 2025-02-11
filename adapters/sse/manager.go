@@ -74,6 +74,10 @@ func (cm *connectionManager[T]) Done() {
 	cm.cancel()
 	cm.consumer.Close()
 	cm.wg.Wait()
+	for _, channel := range cm.channels {
+		channel.UnsubscribeAll()
+	}
+	clear(cm.channels)
 }
 
 // Subscribe 訂閱指定的頻道。
