@@ -46,6 +46,12 @@ spec:
             {{- include "utils.envValue" (dict "name" "Q4_DB_DATABASE" "data" .Values.api.db.database "required" true) | nindent 12 }}
             {{- include "utils.envValue" (dict "name" "Q4_DB_SCHEMA" "data" .Values.api.db.schema "required" true) | nindent 12 }}
 
+            # Redis settings
+            {{- include "utils.envValue" (dict "name" "Q4_REDIS_ADDR" "data" .Values.api.redis.address "required" true) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_REDIS_PASSWORD" "data" .Values.api.redis.password "required" true) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_REDIS_DB" "data" .Values.api.redis.database "required" true) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_REDIS_STREAM_KEY_FOR_SSE" "data" .Values.api.redis.streamKeys.SSE "required" true) | nindent 12 }}
+
         - name: q4-ui
           image: {{ .Values.ui.image }}
           ports:
