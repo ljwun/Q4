@@ -19,6 +19,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/microcosm-cc/bluemonday"
+	"github.com/redis/go-redis/v9"
 	"github.com/samber/lo"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -40,7 +41,7 @@ type ServerImpl struct {
 	db           *gorm.DB
 }
 
-func NewServer(config ServerConfig) (openapi.StrictServerInterface, error) {
+func NewServer(config ServerConfig) (*ServerImpl, error) {
 	const op = "NewServer"
 
 	// 初始化OIDC提供者
@@ -75,13 +76,28 @@ func NewServer(config ServerConfig) (openapi.StrictServerInterface, error) {
 	if err != nil {
 		return nil, fmt.Errorf("[%s] Fail to connect to database, err=%w", op, err)
 	}
+
+	// 初始化Redis連線
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:     config.Redis.Addr,
+		Password: config.Redis.Password,
+		DB:       config.Redis.DB,
+	})
+
+	sseManager := sse.NewConnectionManager[openapi.BidEvent](redisClient, config.Redis.StreamKeys.SSE, slog.Default())
+	sseManager.Start()
+
 	return &ServerImpl{
 		oidcProvider: oidcProvider,
-		sseManager:   sse.NewConnectionManager[openapi.BidEvent](),
+		sseManager:   sseManager,
 		s3Operator:   s3Operator,
 		htmlChecker:  bluemonday.UGCPolicy(),
 		db:           db,
 	}, nil
+}
+
+func (impl *ServerImpl) Close() {
+	impl.sseManager.Done()
 }
 
 // Add a new auction item
