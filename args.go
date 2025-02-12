@@ -33,6 +33,14 @@ func ParseArgs() Args {
 	pflag.String("db-database", "", "")
 	pflag.String("db-schema", "", "")
 
+	// redis config
+	pflag.String("redis-addr", "", "")
+	pflag.String("redis-password", "", "")
+	pflag.Int("redis-db", 15, "")
+
+	// redis stream keys
+	pflag.String("redis-stream-key-for-sse", "q4-shared-sse-stream", "")
+
 	// bind pflag to viper
 	pflag.Parse()
 	viper.BindPFlags(pflag.CommandLine)
@@ -63,6 +71,14 @@ func ParseArgs() Args {
 				Port:     viper.GetInt("db-port"),
 				Database: viper.GetString("db-database"),
 				Schema:   viper.GetString("db-schema"),
+			},
+			Redis: api.RedisConfig{
+				Addr:     viper.GetString("redis-addr"),
+				Password: viper.GetString("redis-password"),
+				DB:       viper.GetInt("redis-db"),
+				StreamKeys: api.RedisStreamKeys{
+					SSE: viper.GetString("redis-stream-key-for-sse"),
+				},
 			},
 		},
 	}

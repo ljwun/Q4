@@ -16,6 +16,8 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	defer strictServer.Close()
+
 	router := gin.Default()
 	handler := openapi.NewStrictHandler(strictServer, nil)
 	openapi.RegisterHandlers(router, handler)
