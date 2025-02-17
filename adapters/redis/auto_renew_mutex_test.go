@@ -2,31 +2,15 @@ package redis
 
 import (
 	"context"
-	"io"
-	"log"
 	"testing"
 	"time"
 
-	"github.com/go-redis/redismock/v9"
 	"github.com/go-redsync/redsync/v4"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 )
-
-func init() {
-	// 將日誌輸出重定向到io.Discard
-	log.SetOutput(io.Discard)
-}
-
-func setupTest(t *testing.T) (*redis.Client, redismock.ClientMock, func()) {
-	db, mock := redismock.NewClientMock()
-	return db, mock, func() {
-		assert.NoError(t, mock.ExpectationsWereMet())
-		db.Close()
-	}
-}
 
 func TestNewAutoRenewMutex(t *testing.T) {
 	tests := []struct {
