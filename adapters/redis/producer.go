@@ -51,7 +51,7 @@ type Producer[T any] struct {
 	options    producerOptions[T]
 }
 
-func NewProducer[T any](client *redis.Client, stream string, opts ...ProducerOption[T]) (*Producer[T], error) {
+func NewProducer[T any](client *redis.Client, stream string, opts ...ProducerOption[T]) (IProducer[T], error) {
 	if client == nil {
 		return nil, errors.New("redis client cannot be nil")
 	}

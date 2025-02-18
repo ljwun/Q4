@@ -59,7 +59,7 @@ func WithAutoRenewMutexSkipLockError(skip bool) AutoRenewMutexOption {
 }
 
 // NewAutoRenewMutex 創建一個帶自動續期功能的互斥鎖
-func NewAutoRenewMutex(client *redis.Client, key string, opts ...AutoRenewMutexOption) *AutoRenewMutex {
+func NewAutoRenewMutex(client *redis.Client, key string, opts ...AutoRenewMutexOption) IAutoRenewMutex {
 	// 默認選項
 	options := autoRenewMutexOptions{
 		expiry:        8 * time.Second,

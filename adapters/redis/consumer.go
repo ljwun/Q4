@@ -60,7 +60,7 @@ type Consumer[T any] struct {
 	options    consumerOptions[T]
 }
 
-func NewConsumer[T any](client *redis.Client, stream string, opts ...ConsumerOption[T]) (*Consumer[T], error) {
+func NewConsumer[T any](client *redis.Client, stream string, opts ...ConsumerOption[T]) (IConsumer[T], error) {
 	if client == nil {
 		return nil, errors.New("redis client cannot be nil")
 	}
