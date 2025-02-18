@@ -22,6 +22,7 @@ require (
 	github.com/stretchr/testify v1.9.0
 	github.com/vmihailenco/msgpack/v5 v5.3.5
 	go.uber.org/goleak v1.1.12
+	go.uber.org/mock v0.5.0
 	gorm.io/driver/postgres v1.5.11
 	gorm.io/gorm v1.25.12
 )
