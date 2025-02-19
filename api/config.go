@@ -1,5 +1,7 @@
 package api
 
+import "time"
+
 type ServerConfig struct {
 	OIDC  OIDCConfig
 	S3    S3Config
@@ -35,9 +37,12 @@ type RedisConfig struct {
 	Password string
 	DB       int
 
+	ExpireTime time.Duration
+
+	KeyPrefix  string
 	StreamKeys RedisStreamKeys
 }
 
 type RedisStreamKeys struct {
-	SSE string
+	BidStream string
 }

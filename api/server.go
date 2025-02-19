@@ -27,6 +27,7 @@ import (
 	"gorm.io/gorm/schema"
 
 	"q4/adapters/oidc"
+	redisAdapter "q4/adapters/redis"
 	internalS3 "q4/adapters/s3"
 	"q4/adapters/sse"
 	"q4/api/openapi"
@@ -38,7 +39,10 @@ type ServerImpl struct {
 	sseManager   sse.ConnectionManager[openapi.BidEvent]
 	s3Operator   *internalS3.S3Operator
 	htmlChecker  *bluemonday.Policy
+	redisClient  *redis.Client
 	db           *gorm.DB
+
+	config ServerConfig
 }
 
 func NewServer(config ServerConfig) (*ServerImpl, error) {
@@ -93,6 +97,7 @@ func NewServer(config ServerConfig) (*ServerImpl, error) {
 		s3Operator:   s3Operator,
 		htmlChecker:  bluemonday.UGCPolicy(),
 		db:           db,
+		config:       config,
 	}, nil
 }
 
@@ -211,7 +216,7 @@ func (impl *ServerImpl) PostAuctionItemItemIDBids(ctx context.Context, request o
 	const op = "PostAuctionItemItemIDBids"
 	// 檢查拍賣物品是否存在
 	auction := models.AuctionItem{ID: request.ItemID}
-	if result := impl.db.First(&auction); result.Error != nil {
+	if result := impl.db.Preload("CurrentBid.User").First(&auction); result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return openapi.PostAuctionItemItemIDBids400JSONResponse{}, nil
 		}
@@ -241,47 +246,60 @@ func (impl *ServerImpl) PostAuctionItemItemIDBids(ctx context.Context, request o
 		return nil, fmt.Errorf("[%s] Fail to find user, err=%w", op, result.Error)
 	}
 
-	// 使用transaction確保出價的一致性
-	errBidTooLow := errors.New("bid too low") // errBidTooLow用於標記出價太低的錯誤
-	bidRecord := models.Bid{
-		Amount:        uint32(request.Body.Bid),
-		UserID:        dbUser.ID,
-		AuctionItemID: auction.ID,
+	// 取得Redis上商品的出價鎖
+	lockKey := fmt.Sprintf("%sauction:%s:lock", impl.config.Redis.KeyPrefix, request.ItemID)
+	dMutex := redisAdapter.NewAutoRenewMutex(impl.redisClient, lockKey)
+	if err := dMutex.Lock(ctx); err != nil {
+		return nil, fmt.Errorf("[%s] Fail to acquire bid lock, err=%w", op, err)
 	}
-	if err := impl.db.Transaction(func(tx *gorm.DB) error {
-		// 1. 先寫入出價紀錄，減少商品資訊row lock的時間
-		if result := tx.Create(&bidRecord); result.Error != nil {
-			return fmt.Errorf("[%s] Fail to create bid, err=%w", op, result.Error)
+	defer func() {
+		_, err := dMutex.Unlock()
+		if err != nil {
+			slog.Warn("[%s] Fail to release bid lock, err=%w", op, err)
 		}
-		// 2. 以單條SQL更新的方式來更新拍賣物品的最高出價，減少查詢一次所需的來回時間
-		//    同時，避免讀取到SI(Snapshot Isolation)的副本，導致誤判(current_bid_id)，進一步造成Lost Update
-		// todo: 增加最低出價間隔
-		sub := tx.Model(&models.Bid{}).Select("1").Where("bids.id=current_bid_id").Where("bids.amount < ?", request.Body.Bid)
-		result := tx.Model(&models.AuctionItem{}).Where("id = ?", auction.ID).Where(
-			tx.Where("current_bid_id IS NULL").Or("EXISTS (?)", sub),
-		).Update("current_bid_id", bidRecord.ID)
-		if result.Error != nil {
-			return fmt.Errorf("[%s] Fail to update auction item, err=%w", op, result.Error)
-		}
-		// 3. 透過UPDATE返回的更新數量，來判斷出價是否成功
-		if result.RowsAffected == 0 {
-			return errBidTooLow
-		}
-		return nil
-	}); err != nil {
-		if errors.Is(err, errBidTooLow) {
-			return openapi.PostAuctionItemItemIDBids400JSONResponse{}, nil
-		}
+	}()
+
+	// 透過Lua script來處理出價
+	auctionKey := fmt.Sprintf("%sauction:%s", impl.config.Redis.KeyPrefix, request.ItemID)
+	status, err := BidScript.Run(ctx, impl.redisClient, []string{auctionKey, impl.config.Redis.StreamKeys.BidStream}, dbUser.ID.String(), request.Body.Bid, time.Now().UnixNano()).Int()
+	if err != nil {
 		return nil, fmt.Errorf("[%s] Fail to place bid, err=%w", op, err)
 	}
-	slog.Info("Higher bid occurs", slog.String("ID", bidRecord.ID.String()), slog.String("user", bidRecord.UserID.String()), slog.Int64("bid", int64(bidRecord.Amount)), slog.String("auctionID", bidRecord.AuctionItemID.String()))
-	// 發送出價事件
-	impl.sseManager.Publish(request.ItemID.String(), openapi.BidEvent{
-		Bid:  request.Body.Bid,
-		User: user.Nickname,
-		Time: time.Now(),
-	})
-	return openapi.PostAuctionItemItemIDBids200Response{}, nil
+	if status == 0 {
+		return openapi.PostAuctionItemItemIDBids400JSONResponse{}, nil
+	} else if status == 1 {
+		slog.Info("Higher bid occurs", slog.String("user", dbUser.ID.String()), slog.Int64("bid", int64(request.Body.Bid)), slog.String("auctionID", dbUser.ID.String()))
+		return openapi.PostAuctionItemItemIDBids200Response{}, nil
+	} else if status != -1 {
+		return nil, fmt.Errorf("[%s] Invalid script return value: %d", op, status)
+	}
+
+	// 將資料庫紀錄的最高出價寫入Redis
+	// NOTE: 由於每次出價都一定會更新Redis，所以除非從請求剛進來時系統向資料庫請求拍賣資訊，
+	//       到取得鎖的過程中，拍賣物品的最高出價已經被其他人更新，且Redis的資料也過期，不然
+	//       請求剛進來時系統向資料庫請求拍賣資訊都能確定是最新的。
+	currentBid := auction.StartingPrice
+	if auction.CurrentBidID != nil {
+		currentBid = auction.CurrentBid.Amount
+	}
+	if err := impl.redisClient.Set(ctx, auctionKey, currentBid, impl.config.Redis.ExpireTime).Err(); err != nil {
+		return nil, fmt.Errorf("[%s] Fail to update current bid in Redis, err=%w", op, err)
+	}
+
+	// 再次透過Lua script來處理出價
+	status, err = BidScript.Run(ctx, impl.redisClient, []string{auctionKey, impl.config.Redis.StreamKeys.BidStream}, dbUser.ID.String(), request.Body.Bid, time.Now().UnixNano()).Int()
+	if err != nil {
+		return nil, fmt.Errorf("[%s] Fail to place bid, err=%w", op, err)
+	}
+	if status == 0 {
+		return openapi.PostAuctionItemItemIDBids400JSONResponse{}, nil
+	} else if status == 1 {
+		slog.Info("Higher bid occurs", slog.String("user", dbUser.ID.String()), slog.Int64("bid", int64(request.Body.Bid)), slog.String("auctionID", dbUser.ID.String()))
+		return openapi.PostAuctionItemItemIDBids200Response{}, nil
+	} else if status != -1 {
+		return nil, fmt.Errorf("[%s] Invalid script return value: %d", op, status)
+	}
+	return nil, fmt.Errorf("[%s] Impossible case occurs: %d", op, status)
 }
 
 // Track auction item events
