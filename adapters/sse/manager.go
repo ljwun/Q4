@@ -4,14 +4,19 @@ import (
 	"context"
 	"log/slog"
 	"sync"
-
-	"github.com/redis/go-redis/v9"
 )
+
+type Subscriber[T any] interface {
+	Subscribe() <-chan T
+}
+
+type Publisher[T any] interface {
+	Publish(data T) error
+}
 
 // connectionManager 管理多個 SSE 頻道的訂閱與發布。
 // 透過 Redis Stream 實現跨節點的訊息廣播，讓多個服務實例能夠協同運作。
 type connectionManager[T any] struct {
-	ctx    context.Context
 	cancel context.CancelFunc
 	logger *slog.Logger
 
@@ -19,44 +24,55 @@ type connectionManager[T any] struct {
 	wg     sync.WaitGroup // 用於等待所有 goroutine 完成
 	active bool           // 標記 manager 是否正在運作中
 
-	consumer *Consumer[PublishRequest[T]] // 處理 Redis Stream 訊息的消費者
-	channels map[string]*Channel[T]       // 儲存所有活躍的頻道
+	channels   map[string]*Channel[T]        // 儲存所有活躍的頻道
+	subscriber Subscriber[PublishRequest[T]] // 用於訂閱上游的訊息
+	publisher  Publisher[PublishRequest[T]]  // 用於發送訊息到上游
 }
 
-// NewConnectionManager 建立一個新的連線管理器。
-// redisClient: 用於操作 Redis Stream
-// streamKey: Redis Stream 的鍵值，用於識別訊息Stream
-func NewConnectionManager[T any](redisClient *redis.Client, streamKey string, logger *slog.Logger) ConnectionManager[T] {
+// NewConnectionManager 建立一個新的連線管理器
+func NewConnectionManager[T any](sub Subscriber[PublishRequest[T]], pub Publisher[PublishRequest[T]], logger *slog.Logger) ConnectionManager[T] {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
 	return &connectionManager[T]{
-		ctx:      ctx,
-		cancel:   cancel,
-		logger:   logger.With("Caller", "ConnectionManager"),
-		channels: make(map[string]*Channel[T]),
-		consumer: NewConsumer[PublishRequest[T]](redisClient, streamKey, logger),
-		active:   true,
+		logger:     logger.With("Caller", "ConnectionManager"),
+		channels:   make(map[string]*Channel[T]),
+		subscriber: sub,
+		publisher:  pub,
+		active:     true,
 	}
 }
 
 // Start 啟動連線管理器，開始處理訊息的接收與廣播。
 // 應在呼叫其他方法前先呼叫此方法。
 func (cm *connectionManager[T]) Start() {
-	cm.consumer.Start()
-
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	if cm.active {
+		return
+	}
+	cm.active = true
+	ctx, cancel := context.WithCancel(context.Background())
+	cm.cancel = cancel
 	// 啟動訊息處理的 goroutine
 	cm.wg.Add(1)
 	go func() {
 		defer cm.wg.Done()
-		for msg := range cm.consumer.Subscribe() {
-			cm.mu.RLock()
-			if channel, ok := cm.channels[msg.Channel]; ok {
-				channel.Broadcast(msg.Message)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg, ok := <-cm.subscriber.Subscribe():
+				if !ok {
+					continue
+				}
+				cm.mu.RLock()
+				if channel, ok := cm.channels[msg.Channel]; ok {
+					channel.Broadcast(msg.Message)
+				}
+				cm.mu.RUnlock()
 			}
-			cm.mu.RUnlock()
 		}
 	}()
 }
@@ -72,7 +88,6 @@ func (cm *connectionManager[T]) Done() {
 
 	cm.active = false
 	cm.cancel()
-	cm.consumer.Close()
 	cm.wg.Wait()
 	for _, channel := range cm.channels {
 		channel.UnsubscribeAll()
@@ -110,7 +125,7 @@ func (cm *connectionManager[T]) Publish(channelName string, data T) error {
 		return context.Canceled
 	}
 
-	return cm.consumer.Publish(PublishRequest[T]{
+	return cm.publisher.Publish(PublishRequest[T]{
 		Channel: channelName,
 		Message: data,
 	})
