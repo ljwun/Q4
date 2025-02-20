@@ -21,6 +21,7 @@ import (
 	"github.com/microcosm-cc/bluemonday"
 	"github.com/redis/go-redis/v9"
 	"github.com/samber/lo"
+	"github.com/vmihailenco/msgpack/v5"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -36,7 +37,7 @@ import (
 
 type ServerImpl struct {
 	oidcProvider *oidc.ExtendedProvider
-	sseManager   sse.ConnectionManager[openapi.BidEvent]
+	sseManager   sse.IConnectionManager[openapi.BidEvent]
 	s3Operator   *internalS3.S3Operator
 	htmlChecker  *bluemonday.Policy
 	redisClient  *redis.Client
@@ -88,7 +89,32 @@ func NewServer(config ServerConfig) (*ServerImpl, error) {
 		DB:       config.Redis.DB,
 	})
 
-	sseManager := sse.NewConnectionManager[openapi.BidEvent](redisClient, config.Redis.StreamKeys.SSE, slog.Default())
+	// 初始化SSE管理器
+	consumer, err := redisAdapter.NewConsumer(
+		redisClient,
+		config.Redis.StreamKeys.BidStream,
+		redisAdapter.WithConsumerParseFunc(func(m map[string]any) (sse.PublishRequest[openapi.BidEvent], error) {
+			bidInfo, err := redisAdapter.DefaultParseFromMessage[BidInfo](m)
+			if err != nil {
+				return sse.PublishRequest[openapi.BidEvent]{}, fmt.Errorf("fail to parse message to sse.PublishRequest[openapi.BidEvent], err=%w", err)
+			}
+			return sse.PublishRequest[openapi.BidEvent]{
+				Channel: bidInfo.ItemID.String(),
+				Message: openapi.BidEvent{
+					Bid:  bidInfo.Amount,
+					User: bidInfo.BidderID.String(),
+					Time: bidInfo.CreatedAt,
+				},
+			}, nil
+		}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("[%s] Fail to create consumer, err=%w", op, err)
+	}
+	sseManager, err := sse.NewConnectionManager[openapi.BidEvent](
+		sse.WithLogger[openapi.BidEvent](slog.Default()),
+		sse.WithSubscriber(consumer),
+	)
 	sseManager.Start()
 
 	return &ServerImpl{
@@ -259,9 +285,21 @@ func (impl *ServerImpl) PostAuctionItemItemIDBids(ctx context.Context, request o
 		}
 	}()
 
-	// 透過Lua script來處理出價
+	// 準備出價資訊
 	auctionKey := fmt.Sprintf("%sauction:%s", impl.config.Redis.KeyPrefix, request.ItemID)
-	status, err := BidScript.Run(ctx, impl.redisClient, []string{auctionKey, impl.config.Redis.StreamKeys.BidStream}, dbUser.ID.String(), request.Body.Bid, time.Now().UnixNano()).Int()
+	bidInfo := BidInfo{
+		ItemID:    request.ItemID,
+		BidderID:  dbUser.ID,
+		Amount:    request.Body.Bid,
+		CreatedAt: time.Now(),
+	}
+	bidInfoBytes, err := msgpack.Marshal(bidInfo)
+	if err != nil {
+		return nil, fmt.Errorf("[%s] Fail to marshal bid info, err=%w", op, err)
+	}
+	bidInfoBase64 := base64.StdEncoding.EncodeToString(bidInfoBytes)
+	// 透過Lua script來處理出價
+	status, err := BidScript.Run(ctx, impl.redisClient, []string{auctionKey, impl.config.Redis.StreamKeys.BidStream}, request.Body.Bid, bidInfoBase64).Int()
 	if err != nil {
 		return nil, fmt.Errorf("[%s] Fail to place bid, err=%w", op, err)
 	}
@@ -287,7 +325,7 @@ func (impl *ServerImpl) PostAuctionItemItemIDBids(ctx context.Context, request o
 	}
 
 	// 再次透過Lua script來處理出價
-	status, err = BidScript.Run(ctx, impl.redisClient, []string{auctionKey, impl.config.Redis.StreamKeys.BidStream}, dbUser.ID.String(), request.Body.Bid, time.Now().UnixNano()).Int()
+	status, err = BidScript.Run(ctx, impl.redisClient, []string{auctionKey, impl.config.Redis.StreamKeys.BidStream}, request.Body.Bid, bidInfoBase64).Int()
 	if err != nil {
 		return nil, fmt.Errorf("[%s] Fail to place bid, err=%w", op, err)
 	}
