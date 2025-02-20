@@ -1,4 +1,4 @@
-//go:generate mockgen -package=redis -destination=mock_test.go -source=interfaces.go
+//go:generate mockgen -package=redis -destination=mock.go -source=interfaces.go
 
 package redis
 
