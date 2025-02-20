@@ -40,16 +40,18 @@ type ConnectionManager[T any] struct {
 	wg     sync.WaitGroup // 用於等待所有 goroutine 完成
 	active bool           // 標記 manager 是否正在運作中
 
-	channels   map[string]IChannel[T]        // 儲存所有活躍的頻道
-	subscriber Subscriber[PublishRequest[T]] // 用於訂閱上游的訊息
-	publisher  Publisher[PublishRequest[T]]  // 用於發送訊息到上游
+	channels          map[string]IChannel[T]        // 儲存所有活躍的頻道
+	subscriber        Subscriber[PublishRequest[T]] // 用於訂閱上游的訊息
+	publisher         Publisher[PublishRequest[T]]  // 用於發送訊息到上游
+	createChannelFunc func() IChannel[T]            // 用於建立新頻道的函數
 }
 
 // connectionManagerOptions 定義連線管理器的設定選項
 type connectionManagerOptions[T any] struct {
-	subscriber Subscriber[PublishRequest[T]] // 必要：用於接收上游訊息的訂閱者
-	publisher  Publisher[PublishRequest[T]]  // 選用：用於發送訊息到上游的發布者
-	logger     *slog.Logger                  // 選用：用於記錄日誌的 logger
+	subscriber        Subscriber[PublishRequest[T]] // 必要：用於接收上游訊息的訂閱者
+	publisher         Publisher[PublishRequest[T]]  // 選用：用於發送訊息到上游的發布者
+	logger            *slog.Logger                  // 選用：用於記錄日誌的 logger
+	createChannelFunc func() IChannel[T]            // 選用：用於建立新頻道的函數
 }
 
 // ConnectionManagerOption 定義設定選項的函式型別
@@ -79,6 +81,14 @@ func WithLogger[T any](logger *slog.Logger) ConnectionManagerOption[T] {
 	}
 }
 
+// WithCreateChannelFunc 設定建立新頻道的函數
+// createFunc: 用於建立新頻道的函數，主要用於測試時注入mock物件
+func WithCreateChannelFunc[T any](createFunc func() IChannel[T]) ConnectionManagerOption[T] {
+	return func(o *connectionManagerOptions[T]) {
+		o.createChannelFunc = createFunc
+	}
+}
+
 // NewConnectionManager 建立一個新的連線管理器
 // opts: 可變參數，用於設定連線管理器的選項
 // 返回:
@@ -86,7 +96,8 @@ func WithLogger[T any](logger *slog.Logger) ConnectionManagerOption[T] {
 //   - error: 若未提供必要的訂閱者，將返回 ErrSubscriberRequired
 func NewConnectionManager[T any](opts ...ConnectionManagerOption[T]) (IConnectionManager[T], error) {
 	options := connectionManagerOptions[T]{
-		logger: slog.Default(),
+		logger:            slog.Default(),
+		createChannelFunc: NewChannel[T], // 設定預設的建立頻道函數
 	}
 
 	for _, opt := range opts {
@@ -98,11 +109,12 @@ func NewConnectionManager[T any](opts ...ConnectionManagerOption[T]) (IConnectio
 	}
 
 	return &ConnectionManager[T]{
-		logger:     options.logger.With("Caller", "ConnectionManager"),
-		channels:   make(map[string]IChannel[T]),
-		subscriber: options.subscriber,
-		publisher:  options.publisher,
-		active:     true,
+		logger:            options.logger.With("Caller", "ConnectionManager"),
+		channels:          make(map[string]IChannel[T]),
+		subscriber:        options.subscriber,
+		publisher:         options.publisher,
+		active:            false,
+		createChannelFunc: options.createChannelFunc,
 	}, nil
 }
 
@@ -121,11 +133,12 @@ func (cm *ConnectionManager[T]) Start() {
 	cm.wg.Add(1)
 	go func() {
 		defer cm.wg.Done()
+		upstream := cm.subscriber.Subscribe()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case msg, ok := <-cm.subscriber.Subscribe():
+			case msg, ok := <-upstream:
 				if !ok {
 					continue
 				}
@@ -175,7 +188,7 @@ func (cm *ConnectionManager[T]) Subscribe(channelName string) (<-chan T, error) 
 
 	c, ok := cm.channels[channelName]
 	if !ok {
-		c = NewChannel[T]()
+		c = cm.createChannelFunc()
 		cm.channels[channelName] = c
 	}
 	return c.Subscribe(), nil
