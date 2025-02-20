@@ -2,133 +2,403 @@ package sse_test
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"testing"
 	"time"
 
-	"github.com/alicebob/miniredis/v2"
-	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"go.uber.org/mock/gomock"
 
+	"q4/adapters/redis"
 	"q4/adapters/sse"
 )
 
-func setupRedis(t *testing.T) (*redis.Client, func()) {
-	mr := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{
-		Addr: mr.Addr(),
-	})
+type testConnectionManagerSetup struct {
+	ctrl       *gomock.Controller
+	subscriber *redis.MockIConsumer[sse.PublishRequest[Message]]
+	publisher  *redis.MockIProducer[sse.PublishRequest[Message]]
+	channel    *sse.MockIChannel[Message]
+}
 
-	return client, func() {
-		client.Close()
-		mr.Close()
+func setupConnectionManagerTest(t *testing.T) testConnectionManagerSetup {
+	ctrl := gomock.NewController(t)
+	return testConnectionManagerSetup{
+		ctrl:       ctrl,
+		subscriber: redis.NewMockIConsumer[sse.PublishRequest[Message]](ctrl),
+		publisher:  redis.NewMockIProducer[sse.PublishRequest[Message]](ctrl),
+		channel:    sse.NewMockIChannel[Message](ctrl),
 	}
 }
 
-func TestConnectionManager(t *testing.T) {
-	testingLogger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	t.Run("basic publish and subscribe", func(t *testing.T) {
-		defer goleak.VerifyNone(t)
-		rdb, closeRedis := setupRedis(t)
-		defer closeRedis()
-		cm := sse.NewConnectionManager[Message](rdb, "test_stream", testingLogger)
-		cm.Start()
-		defer cm.Done()
+func TestNewConnectionManager(t *testing.T) {
+	tests := []struct {
+		name    string
+		opts    []sse.ConnectionManagerOption[Message]
+		wantErr error
+	}{
+		{
+			name: "with subscriber",
+			opts: []sse.ConnectionManagerOption[Message]{
+				sse.WithSubscriber[Message](redis.NewMockIConsumer[sse.PublishRequest[Message]](gomock.NewController(t))),
+			},
+			wantErr: nil,
+		},
+		{
+			name: "all options",
+			opts: []sse.ConnectionManagerOption[Message]{
+				sse.WithSubscriber[Message](redis.NewMockIConsumer[sse.PublishRequest[Message]](gomock.NewController(t))),
+				sse.WithPublisher[Message](redis.NewMockIProducer[sse.PublishRequest[Message]](gomock.NewController(t))),
+				sse.WithLogger[Message](slog.Default()),
+			},
+			wantErr: nil,
+		},
+		{
+			name:    "no option",
+			opts:    []sse.ConnectionManagerOption[Message]{},
+			wantErr: sse.ErrSubscriberRequired,
+		},
+		{
+			name: "nil publisher",
+			opts: []sse.ConnectionManagerOption[Message]{
+				sse.WithSubscriber[Message](redis.NewMockIConsumer[sse.PublishRequest[Message]](gomock.NewController(t))),
+			},
+			wantErr: nil,
+		},
+		{
+			name: "custom channel creator",
+			opts: []sse.ConnectionManagerOption[Message]{
+				sse.WithSubscriber[Message](redis.NewMockIConsumer[sse.PublishRequest[Message]](gomock.NewController(t))),
+				sse.WithCreateChannelFunc[Message](func() sse.IChannel[Message] {
+					return sse.NewChannel[Message]()
+				}),
+			},
+			wantErr: nil,
+		},
+	}
 
-		ch, err := cm.Subscribe("test_channel")
-		require.NoError(t, err)
-		require.NotNil(t, ch)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer goleak.VerifyNone(t)
+			cm, err := sse.NewConnectionManager(tt.opts...)
 
-		msg := Message{Data: "test message"}
-		err = cm.Publish("test_channel", msg)
-		require.NoError(t, err)
-
-		select {
-		case received := <-ch:
-			assert.Equal(t, msg, received)
-		case <-time.After(time.Second):
-			t.Fatal("did not receive message in time")
-		}
-	})
-
-	t.Run("multiple subscribers receive same message", func(t *testing.T) {
-		defer goleak.VerifyNone(t)
-		rdb, closeRedis := setupRedis(t)
-		defer closeRedis()
-		cm := sse.NewConnectionManager[Message](rdb, "test_stream", testingLogger)
-		cm.Start()
-		defer cm.Done()
-
-		ch1, err1 := cm.Subscribe("test_channel")
-		ch2, err2 := cm.Subscribe("test_channel")
-		require.NoError(t, err1)
-		require.NoError(t, err2)
-
-		msg := Message{Data: "broadcast test"}
-		err := cm.Publish("test_channel", msg)
-		require.NoError(t, err)
-
-		for i, ch := range []<-chan Message{ch1, ch2} {
-			select {
-			case received := <-ch:
-				assert.Equal(t, msg, received, "subscriber %d", i+1)
-			case <-time.After(time.Second):
-				t.Fatalf("subscriber %d did not receive message in time", i+1)
+			if tt.wantErr != nil {
+				assert.Error(t, err)
+				assert.ErrorIs(t, err, tt.wantErr)
+				assert.Nil(t, cm)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, cm)
 			}
-		}
+		})
+	}
+}
+
+func TestConnectionManager_Start(t *testing.T) {
+	t.Run("basic", func(t *testing.T) {
+		defer goleak.VerifyNone(t)
+		setup := setupConnectionManagerTest(t)
+		defer setup.ctrl.Finish()
+
+		msgChan := make(chan sse.PublishRequest[Message])
+		setup.subscriber.EXPECT().Subscribe().Return(msgChan)
+
+		cm, err := sse.NewConnectionManager[Message](
+			sse.WithSubscriber[Message](setup.subscriber),
+		)
+		assert.NoError(t, err)
+
+		cm.Start()
+		close(msgChan)
+		cm.Done()
 	})
 
-	t.Run("manager done stops all operations", func(t *testing.T) {
+	t.Run("multiple start", func(t *testing.T) {
 		defer goleak.VerifyNone(t)
-		rdb, closeRedis := setupRedis(t)
-		defer closeRedis()
-		cm := sse.NewConnectionManager[Message](rdb, "test_stream", testingLogger)
+		setup := setupConnectionManagerTest(t)
+		defer setup.ctrl.Finish()
+
+		msgChan := make(chan sse.PublishRequest[Message])
+		setup.subscriber.EXPECT().Subscribe().Return(msgChan)
+
+		cm, err := sse.NewConnectionManager[Message](
+			sse.WithSubscriber[Message](setup.subscriber),
+		)
+		assert.NoError(t, err)
+
+		cm.Start()
+		cm.Start()
+		close(msgChan)
+		cm.Done()
+	})
+
+	t.Run("process messages", func(t *testing.T) {
+		defer goleak.VerifyNone(t)
+		setup := setupConnectionManagerTest(t)
+		defer setup.ctrl.Finish()
+
+		msgChan := make(chan sse.PublishRequest[Message])
+		setup.subscriber.EXPECT().Subscribe().Return(msgChan)
+
+		cm, err := sse.NewConnectionManager[Message](
+			sse.WithSubscriber[Message](setup.subscriber),
+		)
+		assert.NoError(t, err)
+
 		cm.Start()
 
-		ch, err := cm.Subscribe("test_channel")
-		require.NoError(t, err)
+		// Subscribe to create a channel
+		subCh, err := cm.Subscribe("test-channel")
+		assert.NoError(t, err)
 
-		// 正確關閉 manager
+		// Send test message
+		select {
+		case msgChan <- sse.PublishRequest[Message]{
+			Channel: "test-channel",
+			Message: Message{Data: "test"},
+		}:
+		case <-time.After(time.Second):
+			t.Fatal("timeout sending message")
+		}
+
+		// Verify message received
+		select {
+		case msg := <-subCh:
+			assert.Equal(t, "test", msg.Data)
+		case <-time.After(time.Second):
+			t.Fatal("timeout waiting for message")
+		}
+
+		// Clean up
+		close(msgChan)
+		cm.Done()
+	})
+}
+
+func TestConnectionManager_Subscribe(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		defer goleak.VerifyNone(t)
+		setup := setupConnectionManagerTest(t)
+		defer setup.ctrl.Finish()
+
+		msgChan := make(chan sse.PublishRequest[Message])
+		setup.subscriber.EXPECT().Subscribe().Return(msgChan)
+
+		cm, _ := sse.NewConnectionManager[Message](
+			sse.WithSubscriber[Message](setup.subscriber),
+		)
+		cm.Start()
+
+		ch, err := cm.Subscribe("test")
+		assert.NoError(t, err)
+		assert.NotNil(t, ch)
+
+		// Clean up
+		cm.Unsubscribe("test", ch)
+		close(msgChan)
+		cm.Done()
+	})
+
+	t.Run("inactive manager", func(t *testing.T) {
+		defer goleak.VerifyNone(t)
+		setup := setupConnectionManagerTest(t)
+		defer setup.ctrl.Finish()
+
+		msgChan := make(chan sse.PublishRequest[Message])
+		setup.subscriber.EXPECT().Subscribe().Return(msgChan)
+
+		cm, _ := sse.NewConnectionManager[Message](
+			sse.WithSubscriber[Message](setup.subscriber),
+		)
+		cm.Start()
 		cm.Done()
 
-		// 檢查訂閱操作
-		_, err = cm.Subscribe("test_channel")
+		ch, err := cm.Subscribe("test")
+		assert.Error(t, err)
 		assert.ErrorIs(t, err, context.Canceled)
+		assert.Nil(t, ch)
 
-		// 檢查發布操作
-		err = cm.Publish("test_channel", Message{Data: "test"})
-		assert.ErrorIs(t, err, context.Canceled)
-
-		// 確認訂閱通道會被正確關閉
-		select {
-		case _, ok := <-ch:
-			assert.False(t, ok, "channel should be closed")
-		case <-time.After(time.Second):
-			t.Fatal("channel was not closed")
-		}
+		close(msgChan)
 	})
 
-	t.Run("unsubscribe stops message receiving", func(t *testing.T) {
+	t.Run("custom channel creator", func(t *testing.T) {
 		defer goleak.VerifyNone(t)
-		rdb, closeRedis := setupRedis(t)
-		defer closeRedis()
-		cm := sse.NewConnectionManager[Message](rdb, "test_stream", testingLogger)
-		cm.Start()
-		defer cm.Done()
+		setup := setupConnectionManagerTest(t)
+		defer setup.ctrl.Finish()
 
-		ch, err := cm.Subscribe("test_channel")
-		require.NoError(t, err)
+		msgChan := make(chan sse.PublishRequest[Message])
+		setup.subscriber.EXPECT().Subscribe().Return(msgChan)
 
-		cm.Unsubscribe("test_channel", ch)
-
-		// 發送訊息確認已取消訂閱的通道不會收到訊息
-		err = cm.Publish("test_channel", Message{Data: "test"})
-		require.NoError(t, err)
-		for msg := range ch {
-			t.Fatalf("should not receive message after unsubscribe, got: %v", msg)
+		customCreator := func() sse.IChannel[Message] {
+			return setup.channel
 		}
+		setup.channel.EXPECT().Subscribe().Return(make(chan Message))
+		setup.channel.EXPECT().UnsubscribeAll()
+
+		cm, _ := sse.NewConnectionManager[Message](
+			sse.WithSubscriber[Message](setup.subscriber),
+			sse.WithCreateChannelFunc[Message](customCreator),
+		)
+		cm.Start()
+
+		ch, err := cm.Subscribe("test")
+		assert.NoError(t, err)
+		assert.NotNil(t, ch)
+
+		close(msgChan)
+		cm.Done()
+	})
+
+}
+
+func TestConnectionManager_Publish(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		defer goleak.VerifyNone(t)
+		setup := setupConnectionManagerTest(t)
+		defer setup.ctrl.Finish()
+
+		msgChan := make(chan sse.PublishRequest[Message])
+		setup.subscriber.EXPECT().Subscribe().Return(msgChan)
+
+		testMsg := Message{Data: "test"}
+		setup.publisher.EXPECT().Publish(sse.PublishRequest[Message]{
+			Channel: "test",
+			Message: testMsg,
+		}).Return(nil)
+
+		cm, _ := sse.NewConnectionManager[Message](
+			sse.WithSubscriber[Message](setup.subscriber),
+			sse.WithPublisher[Message](setup.publisher),
+		)
+		cm.Start()
+
+		err := cm.Publish("test", testMsg)
+		assert.NoError(t, err)
+
+		// Clean up
+		close(msgChan)
+		cm.Done()
+	})
+
+	t.Run("no publisher", func(t *testing.T) {
+		defer goleak.VerifyNone(t)
+		setup := setupConnectionManagerTest(t)
+		defer setup.ctrl.Finish()
+
+		msgChan := make(chan sse.PublishRequest[Message])
+		setup.subscriber.EXPECT().Subscribe().Return(msgChan)
+
+		cm, _ := sse.NewConnectionManager[Message](
+			sse.WithSubscriber[Message](setup.subscriber),
+		)
+		cm.Start()
+
+		err := cm.Publish("test", Message{Data: "test"})
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, sse.ErrPublisherNotConfigured)
+
+		// Clean up
+		close(msgChan)
+		cm.Done()
+	})
+
+	t.Run("inactive manager", func(t *testing.T) {
+		defer goleak.VerifyNone(t)
+		setup := setupConnectionManagerTest(t)
+		defer setup.ctrl.Finish()
+
+		msgChan := make(chan sse.PublishRequest[Message])
+		setup.subscriber.EXPECT().Subscribe().Return(msgChan)
+
+		cm, _ := sse.NewConnectionManager[Message](
+			sse.WithSubscriber[Message](setup.subscriber),
+			sse.WithPublisher[Message](setup.publisher),
+		)
+		cm.Start()
+		cm.Done()
+
+		err := cm.Publish("test", Message{Data: "test"})
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, context.Canceled)
+
+		close(msgChan)
+	})
+}
+
+func TestConnectionManager_Unsubscribe(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		defer goleak.VerifyNone(t)
+		setup := setupConnectionManagerTest(t)
+		defer setup.ctrl.Finish()
+
+		msgChan := make(chan sse.PublishRequest[Message])
+		setup.subscriber.EXPECT().Subscribe().Return(msgChan)
+
+		cm, _ := sse.NewConnectionManager[Message](
+			sse.WithSubscriber[Message](setup.subscriber),
+		)
+		cm.Start()
+
+		ch, _ := cm.Subscribe("test")
+		cm.Unsubscribe("test", ch)
+
+		// Clean up
+		close(msgChan)
+		cm.Done()
+	})
+
+	t.Run("nonexistent channel", func(t *testing.T) {
+		defer goleak.VerifyNone(t)
+		setup := setupConnectionManagerTest(t)
+		defer setup.ctrl.Finish()
+
+		msgChan := make(chan sse.PublishRequest[Message])
+		setup.subscriber.EXPECT().Subscribe().Return(msgChan)
+
+		cm, _ := sse.NewConnectionManager[Message](
+			sse.WithSubscriber[Message](setup.subscriber),
+		)
+		cm.Start()
+
+		ch := make(chan Message)
+		cm.Unsubscribe("non-existent", ch)
+
+		// Clean up
+		close(msgChan)
+		cm.Done()
+	})
+}
+
+func TestConnectionManager_Done(t *testing.T) {
+	t.Run("cleanup", func(t *testing.T) {
+		defer goleak.VerifyNone(t)
+		setup := setupConnectionManagerTest(t)
+		defer setup.ctrl.Finish()
+
+		msgChan := make(chan sse.PublishRequest[Message])
+		setup.subscriber.EXPECT().Subscribe().Return(msgChan)
+
+		cm, _ := sse.NewConnectionManager[Message](
+			sse.WithSubscriber[Message](setup.subscriber),
+		)
+		cm.Start()
+
+		// Subscribe to create some channels
+		ch1, _ := cm.Subscribe("test1")
+		ch2, _ := cm.Subscribe("test2")
+
+		// Call Done
+		cm.Done()
+
+		// Verify channels are closed
+		_, ok1 := <-ch1
+		_, ok2 := <-ch2
+		assert.False(t, ok1)
+		assert.False(t, ok2)
+
+		// Call Done again to test idempotency
+		cm.Done()
+
+		close(msgChan)
 	})
 }
