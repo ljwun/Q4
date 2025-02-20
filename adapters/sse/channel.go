@@ -12,7 +12,7 @@ type Channel[T any] struct {
 }
 
 // NewChannel creates a new SSE channel.
-func NewChannel[T any]() *Channel[T] {
+func NewChannel[T any]() IChannel[T] {
 	return &Channel[T]{
 		subscribers: make(map[<-chan T]chan<- T),
 	}
