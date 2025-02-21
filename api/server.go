@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	awsCfg "github.com/aws/aws-sdk-go-v2/config"
@@ -36,12 +37,16 @@ import (
 )
 
 type ServerImpl struct {
-	oidcProvider *oidc.ExtendedProvider
-	sseManager   sse.IConnectionManager[openapi.BidEvent]
-	s3Operator   *internalS3.S3Operator
-	htmlChecker  *bluemonday.Policy
-	redisClient  *redis.Client
-	db           *gorm.DB
+	oidcProvider  *oidc.ExtendedProvider
+	sseManager    sse.IConnectionManager[openapi.BidEvent]
+	s3Operator    *internalS3.S3Operator
+	htmlChecker   *bluemonday.Policy
+	redisClient   *redis.Client
+	consumer      redisAdapter.IConsumer[sse.PublishRequest[openapi.BidEvent]]
+	groupConsumer redisAdapter.IGroupConsumer[BidInfo]
+	wg            sync.WaitGroup
+	cancelFunc    context.CancelFunc
+	db            *gorm.DB
 
 	config ServerConfig
 }
@@ -115,19 +120,116 @@ func NewServer(config ServerConfig) (*ServerImpl, error) {
 		sse.WithLogger[openapi.BidEvent](slog.Default()),
 		sse.WithSubscriber(consumer),
 	)
-	sseManager.Start()
+
+	// 初始化group consumer
+	groupConsumer, err := redisAdapter.NewGroupConsumer[BidInfo](
+		redisClient,
+		config.Redis.StreamKeys.BidStream,
+		config.Redis.ConsumerGroup,
+		config.ID,
+		redisAdapter.WithGroupConsumerLogger[BidInfo](slog.Default()),
+		redisAdapter.WithGroupConsumerStrictOrdering[BidInfo](true),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("[%s] Fail to create group consumer, err=%w", op, err)
+	}
 
 	return &ServerImpl{
-		oidcProvider: oidcProvider,
-		sseManager:   sseManager,
-		s3Operator:   s3Operator,
-		htmlChecker:  bluemonday.UGCPolicy(),
-		db:           db,
-		config:       config,
+		oidcProvider:  oidcProvider,
+		sseManager:    sseManager,
+		s3Operator:    s3Operator,
+		htmlChecker:   bluemonday.UGCPolicy(),
+		redisClient:   redisClient,
+		consumer:      consumer,
+		groupConsumer: groupConsumer,
+		db:            db,
+		config:        config,
 	}, nil
 }
 
+func (impl *ServerImpl) Start() {
+	// 啟動consumer
+	impl.consumer.Start()
+	// 啟動sse connection manager
+	impl.sseManager.Start()
+	// 啟動group consumer
+	impl.groupConsumer.Start()
+	// 啟動一個worker用於將Redis中的出價紀錄存回資料庫
+	ctx, cancel := context.WithCancel(context.Background())
+	impl.cancelFunc = cancel
+	slog.Info("Start bid synchronization worker")
+	impl.wg.Add(1)
+	go func() {
+		logger := slog.Default().With(slog.String("caller", "BidSynchronize"))
+		defer impl.wg.Done()
+		defer slog.Info("Bid synchronization worker stopped")
+		defer impl.groupConsumer.Close()
+		ch := impl.groupConsumer.Subscribe()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg, ok := <-ch:
+				if !ok {
+					return
+				}
+				logger.Debug("Receive message")
+				handle := func() error {
+					// 新增出價紀錄
+					record := models.Bid{
+						UserID:        msg.Data.BidderID,
+						Amount:        msg.Data.Amount,
+						AuctionItemID: msg.Data.ItemID,
+					}
+					if result := impl.db.Create(&record); result.Error != nil {
+						return fmt.Errorf("fail to create bid record, err=%w", result.Error)
+					}
+					// 更新最高出價
+					auction := models.AuctionItem{ID: msg.Data.ItemID}
+					if result := impl.db.Preload("CurrentBid.User").First(&auction); result.Error != nil {
+						return fmt.Errorf("fail to find auction item, err=%w", result.Error)
+					}
+					if auction.CurrentBid != nil && auction.CurrentBid.Amount < msg.Data.Amount || auction.CurrentBid == nil && auction.StartingPrice < msg.Data.Amount {
+						logger.Debug("Update current bid", slog.String("itemID", msg.Data.ItemID.String()), slog.Int64("from", int64(auction.CurrentBid.Amount)), slog.Int64("to", int64(msg.Data.Amount)))
+						auction.CurrentBidID = &record.ID
+						if result := impl.db.Save(&auction); result.Error != nil {
+							return fmt.Errorf("fail to update auction item, err=%w", result.Error)
+						}
+					} else {
+						logger.Warn("Ignore lower bid", slog.String("itemID", msg.Data.ItemID.String()), slog.Int64("current", int64(auction.CurrentBid.Amount)), slog.Int64("new", int64(msg.Data.Amount)))
+					}
+					return nil
+				}
+				handleErr := handle()
+				if handleErr != nil {
+					logger.Error("Fail to synchronize bid", slog.Any("error", handleErr))
+					if err := msg.Fail(ctx, handleErr); err != nil {
+						logger.Error("Fail to fail message", slog.Any("error", err))
+					}
+					continue
+				}
+				if err := msg.Done(ctx); err != nil {
+					logger.Error("Sync success but fail to done message", slog.Any("error", err))
+					if err := msg.Fail(ctx, err); err != nil {
+						logger.Error("Sync success but fail to fail message", slog.Any("error", err))
+					}
+					continue
+				}
+				logger.Debug("Synchronize success")
+			}
+		}
+	}()
+}
+
 func (impl *ServerImpl) Close() {
+	// 關閉group consumer
+	impl.groupConsumer.Close()
+	// 關閉worker
+	impl.cancelFunc()
+	impl.wg.Wait()
+	// 關閉consumer
+	impl.consumer.Close()
+	// 關閉sse connection manager
 	impl.sseManager.Done()
 }
 

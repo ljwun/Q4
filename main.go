@@ -1,6 +1,9 @@
 package main
 
 import (
+	"log/slog"
+	"os"
+
 	"github.com/gin-gonic/gin"
 
 	"q4/api"
@@ -12,10 +15,14 @@ func main() {
 	if !args.Validate() {
 		panic("missing arguments")
 	}
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	})))
 	strictServer, err := api.NewServer(args.ServerConfig)
 	if err != nil {
 		panic(err)
 	}
+	strictServer.Start()
 	defer strictServer.Close()
 
 	router := gin.Default()
