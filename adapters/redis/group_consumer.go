@@ -25,16 +25,43 @@ type Message[T any] struct {
 	messageID string
 	stream    string
 	group     string
+
+	raw map[string]any
 }
 
 // Done 確認消息已處理完成
 func (m *Message[T]) Done(ctx context.Context) error {
+	const op = "Message.Done"
 	if m.done {
 		return nil
 	}
 	err := m.client.XAck(ctx, m.stream, m.group, m.messageID).Err()
 	if err != nil {
-		return fmt.Errorf("ack error: %w", err)
+		return fmt.Errorf("[%s] failed to ack message: %w", op, err)
+	}
+	m.done = true
+	return nil
+}
+
+// Fail 確認消息處理失敗
+func (m *Message[T]) Fail(ctx context.Context, failErr error) error {
+	const op = "Message.Fail"
+	if m.done {
+		return nil
+	}
+
+	m.raw["error"] = failErr.Error()
+	err := m.client.XAdd(ctx, &redis.XAddArgs{
+		Stream: m.stream + ":dead-letter",
+		Values: m.raw,
+	}).Err()
+	if err != nil {
+		return fmt.Errorf("[%s] failed to move message to dead letter queue: %w", op, err)
+	}
+
+	err = m.client.XAck(ctx, m.stream, m.group, m.messageID).Err()
+	if err != nil {
+		return fmt.Errorf("[%s] failed to ack failed message: %w", op, err)
 	}
 	m.done = true
 	return nil
@@ -135,15 +162,13 @@ func NewGroupConsumer[T any](
 	}
 
 	gc := &GroupConsumer[T]{
-		wg:         sync.WaitGroup{},
-		downStream: make(chan *Message[T], options.bufferSize),
-		logger:     options.logger.With(slog.String("caller", "GroupConsumer"), slog.String("stream", stream), slog.String("group", group), slog.String("consumer", consumer)),
-		client:     client,
-		stream:     stream,
-		group:      group,
-		consumer:   consumer,
-		closed:     true,
-		options:    options,
+		logger:   options.logger.With(slog.String("caller", "GroupConsumer"), slog.String("stream", stream), slog.String("group", group), slog.String("consumer", consumer)),
+		client:   client,
+		stream:   stream,
+		group:    group,
+		consumer: consumer,
+		closed:   true,
+		options:  options,
 	}
 
 	// 只在嚴格順序模式下設置mutex
@@ -163,6 +188,7 @@ func (s *GroupConsumer[T]) Start() error {
 		return nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	s.downStream = make(chan *Message[T], s.options.bufferSize)
 	s.cancelFunc = cancel
 	s.closed = false
 	s.logger.Info("starting group consumer")
@@ -228,6 +254,7 @@ func (s *GroupConsumer[T]) Start() error {
 					stream:    s.stream,
 					group:     s.group,
 					client:    s.client,
+					raw:       message.Values,
 				}
 
 				if err := s.moveToDownStream(ctx, msg); err != nil {
