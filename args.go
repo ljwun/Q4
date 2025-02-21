@@ -2,6 +2,7 @@ package main
 
 import (
 	"strings"
+	"time"
 
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -12,6 +13,7 @@ import (
 func ParseArgs() Args {
 	// server config
 	pflag.String("server-url", "0.0.0.0:8080", "")
+	pflag.String("instance-id", "", "")
 
 	// oidc config
 	pflag.String("oidc-issuer-url", "", "")
@@ -37,9 +39,12 @@ func ParseArgs() Args {
 	pflag.String("redis-addr", "", "")
 	pflag.String("redis-password", "", "")
 	pflag.Int("redis-db", 15, "")
+	pflag.Duration("redis-expire-time", 3*24*time.Hour, "")
+	pflag.String("redis-key-prefix", "q4:", "")
+	pflag.String("redis-consumer-group", "q4-bid-group", "")
 
 	// redis stream keys
-	pflag.String("redis-stream-key-for-sse", "q4-shared-sse-stream", "")
+	pflag.String("redis-stream-key-for-bid", "q4-shared-bid-stream", "")
 
 	// bind pflag to viper
 	pflag.Parse()
@@ -52,6 +57,7 @@ func ParseArgs() Args {
 	return Args{
 		ServerURL: viper.GetString("server-url"),
 		ServerConfig: api.ServerConfig{
+			ID: viper.GetString("instance-id"),
 			OIDC: api.OIDCConfig{
 				IssuerURL:    viper.GetString("oidc-issuer-url"),
 				ClientID:     viper.GetString("oidc-client-id"),
@@ -73,11 +79,14 @@ func ParseArgs() Args {
 				Schema:   viper.GetString("db-schema"),
 			},
 			Redis: api.RedisConfig{
-				Addr:     viper.GetString("redis-addr"),
-				Password: viper.GetString("redis-password"),
-				DB:       viper.GetInt("redis-db"),
+				Addr:          viper.GetString("redis-addr"),
+				Password:      viper.GetString("redis-password"),
+				DB:            viper.GetInt("redis-db"),
+				ExpireTime:    viper.GetDuration("redis-expire-time"),
+				KeyPrefix:     viper.GetString("redis-key-prefix"),
+				ConsumerGroup: viper.GetString("redis-consumer-group"),
 				StreamKeys: api.RedisStreamKeys{
-					SSE: viper.GetString("redis-stream-key-for-sse"),
+					BidStream: viper.GetString("redis-stream-key-for-bid"),
 				},
 			},
 		},

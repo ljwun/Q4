@@ -3,6 +3,9 @@ package api
 import "time"
 
 type ServerConfig struct {
+	// 用於識別不同的服務實例
+	ID string
+
 	OIDC  OIDCConfig
 	S3    S3Config
 	DB    DBConfig
@@ -39,8 +42,9 @@ type RedisConfig struct {
 
 	ExpireTime time.Duration
 
-	KeyPrefix  string
-	StreamKeys RedisStreamKeys
+	KeyPrefix     string
+	ConsumerGroup string
+	StreamKeys    RedisStreamKeys
 }
 
 type RedisStreamKeys struct {
