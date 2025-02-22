@@ -18,7 +18,7 @@ import (
 // compareBidInfo compares two BidInfo structs with proper time comparison
 func compareBidInfo(t *testing.T, expected, actual BidInfo) {
 	assert.Equal(t, expected.ItemID, actual.ItemID)
-	assert.Equal(t, expected.BidderID, actual.BidderID)
+	assert.Equal(t, expected.User, actual.User)
 	assert.Equal(t, expected.Amount, actual.Amount)
 	assert.True(t, expected.CreatedAt.Equal(actual.CreatedAt),
 		"CreatedAt times are not equal. Expected: %v, Got: %v",
@@ -42,7 +42,10 @@ func TestBidScript(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 	itemID := uuid.New()
-	bidderID := uuid.New()
+	user := BidInfoUser{
+		ID:   uuid.New(),
+		Name: "TestUser",
+	}
 
 	tests := []struct {
 		name        string
@@ -63,7 +66,7 @@ func TestBidScript(t *testing.T) {
 			bidAmount: "100",
 			bidInfo: BidInfo{
 				ItemID:    itemID,
-				BidderID:  bidderID,
+				User:      user,
 				Amount:    100,
 				CreatedAt: now,
 			},
@@ -81,7 +84,7 @@ func TestBidScript(t *testing.T) {
 			expireTime: "3600",
 			bidInfo: BidInfo{
 				ItemID:    itemID,
-				BidderID:  bidderID,
+				User:      user,
 				Amount:    100,
 				CreatedAt: now,
 			},
@@ -98,7 +101,7 @@ func TestBidScript(t *testing.T) {
 			expireTime: "3600",
 			bidInfo: BidInfo{
 				ItemID:    itemID,
-				BidderID:  bidderID,
+				User:      user,
 				Amount:    200,
 				CreatedAt: now,
 			},

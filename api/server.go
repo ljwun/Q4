@@ -107,7 +107,7 @@ func NewServer(config ServerConfig) (*ServerImpl, error) {
 				Channel: bidInfo.ItemID.String(),
 				Message: openapi.BidEvent{
 					Bid:  bidInfo.Amount,
-					User: bidInfo.BidderID.String(),
+					User: bidInfo.User.Name,
 					Time: bidInfo.CreatedAt,
 				},
 			}, nil
@@ -177,7 +177,7 @@ func (impl *ServerImpl) Start() {
 				handle := func() error {
 					// 更新最高出價
 					record := models.Bid{
-						UserID:        msg.Data.BidderID,
+						UserID:        msg.Data.User.ID,
 						Amount:        msg.Data.Amount,
 						AuctionItemID: msg.Data.ItemID,
 					}
@@ -387,8 +387,11 @@ func (impl *ServerImpl) PostAuctionItemItemIDBids(ctx context.Context, request o
 	// 準備出價資訊
 	auctionKey := fmt.Sprintf("%sauction:%s", impl.config.Redis.KeyPrefix, request.ItemID)
 	bidInfo := BidInfo{
-		ItemID:    request.ItemID,
-		BidderID:  dbUser.ID,
+		ItemID: request.ItemID,
+		User: BidInfoUser{
+			ID:   dbUser.ID,
+			Name: dbUser.Username,
+		},
 		Amount:    request.Body.Bid,
 		CreatedAt: time.Now(),
 	}

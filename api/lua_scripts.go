@@ -7,10 +7,16 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// BidInfoUser represents a user
+type BidInfoUser struct {
+	ID   uuid.UUID
+	Name string
+}
+
 // BidInfo represents the bid information
 type BidInfo struct {
 	ItemID    uuid.UUID
-	BidderID  uuid.UUID
+	User      BidInfoUser
 	Amount    uint32
 	CreatedAt time.Time
 }
