@@ -21,6 +21,7 @@ type BidInfo struct {
 //	KEYS[2] - 競價的 stream
 //	ARGV[1] - 競價金額
 //	ARGV[2] - 競價資訊(結構參考BidInfo，會進行msgpack和base64的處理)
+//	ARGV[3] - 過期時間(秒)
 //
 // 返回值:
 //
@@ -53,7 +54,7 @@ if new_bid <= current_bid then
 end
 
 -- 更新最高競價
-redis.call('SET', KEYS[1], new_bid)
+redis.call('SET', KEYS[1], new_bid, 'EX', ARGV[3])
 
 -- 將競價記錄寫入 stream
 redis.call('XADD', KEYS[2], '*', 'data', ARGV[2])

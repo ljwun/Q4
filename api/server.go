@@ -397,8 +397,9 @@ func (impl *ServerImpl) PostAuctionItemItemIDBids(ctx context.Context, request o
 		return nil, fmt.Errorf("[%s] Fail to marshal bid info, err=%w", op, err)
 	}
 	bidInfoBase64 := base64.StdEncoding.EncodeToString(bidInfoBytes)
+	expireTime := impl.config.Redis.ExpireTime.Seconds()
 	// 透過Lua script來處理出價
-	status, err := BidScript.Run(ctx, impl.redisClient, []string{auctionKey, impl.config.Redis.StreamKeys.BidStream}, request.Body.Bid, bidInfoBase64).Int()
+	status, err := BidScript.Run(ctx, impl.redisClient, []string{auctionKey, impl.config.Redis.StreamKeys.BidStream}, request.Body.Bid, bidInfoBase64, expireTime).Int()
 	if err != nil {
 		return nil, fmt.Errorf("[%s] Fail to place bid, err=%w", op, err)
 	}
@@ -424,7 +425,7 @@ func (impl *ServerImpl) PostAuctionItemItemIDBids(ctx context.Context, request o
 	}
 
 	// 再次透過Lua script來處理出價
-	status, err = BidScript.Run(ctx, impl.redisClient, []string{auctionKey, impl.config.Redis.StreamKeys.BidStream}, request.Body.Bid, bidInfoBase64).Int()
+	status, err = BidScript.Run(ctx, impl.redisClient, []string{auctionKey, impl.config.Redis.StreamKeys.BidStream}, request.Body.Bid, bidInfoBase64, expireTime).Int()
 	if err != nil {
 		return nil, fmt.Errorf("[%s] Fail to place bid, err=%w", op, err)
 	}

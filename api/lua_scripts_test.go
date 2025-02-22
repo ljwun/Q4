@@ -51,6 +51,7 @@ func TestBidScript(t *testing.T) {
 		streamKey   string
 		bidAmount   string
 		bidInfo     BidInfo
+		expireTime  string
 		want        int
 		checkStream bool
 	}{
@@ -66,16 +67,18 @@ func TestBidScript(t *testing.T) {
 				Amount:    100,
 				CreatedAt: now,
 			},
-			want: -1,
+			expireTime: "3600",
+			want:       -1,
 		},
 		{
 			name: "出價金額不足時應返回0",
 			setupFunc: func() {
 				mr.Set("item:1", "200")
 			},
-			itemKey:   "item:1",
-			streamKey: "stream:bids",
-			bidAmount: "100",
+			itemKey:    "item:1",
+			streamKey:  "stream:bids",
+			bidAmount:  "100",
+			expireTime: "3600",
 			bidInfo: BidInfo{
 				ItemID:    itemID,
 				BidderID:  bidderID,
@@ -89,9 +92,10 @@ func TestBidScript(t *testing.T) {
 			setupFunc: func() {
 				mr.Set("item:1", "100")
 			},
-			itemKey:   "item:1",
-			streamKey: "stream:bids",
-			bidAmount: "200",
+			itemKey:    "item:1",
+			streamKey:  "stream:bids",
+			bidAmount:  "200",
+			expireTime: "3600",
 			bidInfo: BidInfo{
 				ItemID:    itemID,
 				BidderID:  bidderID,
@@ -119,7 +123,7 @@ func TestBidScript(t *testing.T) {
 			// 執行腳本
 			result, err := BidScript.Run(ctx, client,
 				[]string{tt.itemKey, tt.streamKey},
-				tt.bidAmount, bidInfo,
+				tt.bidAmount, bidInfo, tt.expireTime,
 			).Int()
 
 			// 驗證結果
@@ -132,6 +136,11 @@ func TestBidScript(t *testing.T) {
 				val, err := client.Get(ctx, tt.itemKey).Result()
 				assert.NoError(t, err)
 				assert.Equal(t, tt.bidAmount, val)
+
+				// 檢查過期時間
+				ttl, err := client.TTL(ctx, tt.itemKey).Result()
+				assert.NoError(t, err)
+				assert.True(t, ttl > 0)
 
 				// 檢查stream記錄
 				streams, err := client.XRange(ctx, tt.streamKey, "-", "+").Result()
