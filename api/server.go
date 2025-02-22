@@ -175,16 +175,12 @@ func (impl *ServerImpl) Start() {
 				}
 				logger.Debug("Receive message")
 				handle := func() error {
-					// 新增出價紀錄
+					// 更新最高出價
 					record := models.Bid{
 						UserID:        msg.Data.BidderID,
 						Amount:        msg.Data.Amount,
 						AuctionItemID: msg.Data.ItemID,
 					}
-					if result := impl.db.Create(&record); result.Error != nil {
-						return fmt.Errorf("fail to create bid record, err=%w", result.Error)
-					}
-					// 更新最高出價
 					auction := models.AuctionItem{ID: msg.Data.ItemID}
 					if result := impl.db.Preload("CurrentBid.User").First(&auction); result.Error != nil {
 						return fmt.Errorf("fail to find auction item, err=%w", result.Error)
@@ -192,6 +188,7 @@ func (impl *ServerImpl) Start() {
 					if auction.CurrentBid != nil && auction.CurrentBid.Amount < msg.Data.Amount || auction.CurrentBid == nil && auction.StartingPrice < msg.Data.Amount {
 						logger.Debug("Update current bid", slog.String("itemID", msg.Data.ItemID.String()), slog.Int64("from", int64(auction.CurrentBid.Amount)), slog.Int64("to", int64(msg.Data.Amount)))
 						auction.CurrentBidID = &record.ID
+						auction.CurrentBid = &record
 						if result := impl.db.Save(&auction); result.Error != nil {
 							return fmt.Errorf("fail to update auction item, err=%w", result.Error)
 						}
