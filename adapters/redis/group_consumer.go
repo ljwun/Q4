@@ -196,12 +196,14 @@ func (s *GroupConsumer[T]) Start() error {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		defer s.logger.Info("consumer goroutine stopped")
+		defer s.logger.Info("group consumer goroutine stopped")
 		defer close(s.downStream)
 
 		// 如果是嚴格順序模式，拿到鎖後先獲取所有pending消息ID
 		if s.options.strictOrdering {
-			if err := s.mutex.Lock(ctx); err != nil {
+			var err error
+			ctx, err = s.mutex.Lock(ctx)
+			if err != nil {
 				s.logger.Error("failed to acquire lock", slog.Any("error", err))
 				s.cancelFunc()
 				return
@@ -224,6 +226,9 @@ func (s *GroupConsumer[T]) Start() error {
 				if err != nil {
 					if errors.Is(err, redis.Nil) {
 						continue // 沒有新消息，正常情況
+					}
+					if errors.Is(err, context.Canceled) {
+						return // context被取消，直接返回
 					}
 					s.logger.Error("fetch message error", slog.Any("error", err))
 					continue

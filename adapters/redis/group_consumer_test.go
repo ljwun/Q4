@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"testing"
 	"time"
@@ -106,7 +107,9 @@ func TestGroupConsumer_StartStop(t *testing.T) {
 		defer ctrl.Finish()
 
 		mockMutex := NewMockIAutoRenewMutex(ctrl)
-		mockMutex.EXPECT().Lock(gomock.Any()).Return(nil)
+		mockMutex.EXPECT().Lock(gomock.Any()).DoAndReturn(func(ctx context.Context) (context.Context, error) {
+			return ctx, nil
+		})
 		mockMutex.EXPECT().Unlock().Return(true, nil)
 
 		mock.ExpectXPendingExt(&redis.XPendingExtArgs{
@@ -143,7 +146,7 @@ func TestGroupConsumer_StartStop(t *testing.T) {
 		defer ctrl.Finish()
 
 		mockMutex := NewMockIAutoRenewMutex(ctrl)
-		mockMutex.EXPECT().Lock(gomock.Any()).Return(errors.New("lock error"))
+		mockMutex.EXPECT().Lock(gomock.Any()).Return(nil, errors.New("lock error"))
 
 		consumer, err := NewGroupConsumer[TestMessage](
 			client,
@@ -212,6 +215,55 @@ func TestGroupConsumer_StartStop(t *testing.T) {
 		err = consumer.Close()
 		assert.NoError(t, err)
 	})
+
+	t.Run("lock context cancellation", func(t *testing.T) {
+		defer goleak.VerifyNone(t)
+		client, mock, cleanup := setupTest(t)
+		defer cleanup()
+
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockMutex := NewMockIAutoRenewMutex(ctrl)
+		mockCtx, mockCancel := context.WithCancel(context.Background())
+		// 模擬鎖失效的情況
+		mockCancel()
+		mockMutex.EXPECT().Lock(gomock.Any()).Return(mockCtx, nil)
+		mockMutex.EXPECT().Unlock().Return(true, nil)
+
+		// 模擬 pendingExt 返回一些消息
+		mock.ExpectXPendingExt(&redis.XPendingExtArgs{
+			Stream: "test-stream",
+			Group:  "test-group",
+			Start:  "-",
+			End:    "+",
+			Count:  100,
+		}).SetVal([]redis.XPendingExt{
+			{ID: "1234-0"},
+			{ID: "1234-1"},
+		})
+
+		consumer, err := NewGroupConsumer[TestMessage](
+			client,
+			"test-stream",
+			"test-group",
+			"test-consumer",
+			WithGroupConsumerStrictOrdering[TestMessage](true),
+			WithGroupConsumerMutex[TestMessage](mockMutex),
+		)
+		require.NoError(t, err)
+
+		err = consumer.Start()
+		assert.NoError(t, err)
+
+		// 檢查消費者是否仍在運行
+		ch := consumer.Subscribe()
+		_, ok := <-ch
+		assert.False(t, ok, "channel should be closed after lock context cancellation")
+
+		err = consumer.Close()
+		assert.NoError(t, err)
+	})
 }
 
 func TestGroupConsumer_MessageProcessing(t *testing.T) {
@@ -224,7 +276,9 @@ func TestGroupConsumer_MessageProcessing(t *testing.T) {
 		defer ctrl.Finish()
 
 		mockMutex := NewMockIAutoRenewMutex(ctrl)
-		mockMutex.EXPECT().Lock(gomock.Any()).Return(nil)
+		mockMutex.EXPECT().Lock(gomock.Any()).DoAndReturn(func(ctx context.Context) (context.Context, error) {
+			return ctx, nil
+		})
 		mockMutex.EXPECT().Unlock().Return(true, nil).AnyTimes()
 
 		// Setup test message
@@ -299,7 +353,9 @@ func TestGroupConsumer_MessageProcessing(t *testing.T) {
 		defer ctrl.Finish()
 
 		mockMutex := NewMockIAutoRenewMutex(ctrl)
-		mockMutex.EXPECT().Lock(gomock.Any()).Return(nil)
+		mockMutex.EXPECT().Lock(gomock.Any()).DoAndReturn(func(ctx context.Context) (context.Context, error) {
+			return ctx, nil
+		})
 		mockMutex.EXPECT().Unlock().Return(true, nil).AnyTimes()
 
 		// Set expectations for invalid message
@@ -368,7 +424,9 @@ func TestGroupConsumer_MessageProcessing(t *testing.T) {
 		defer ctrl.Finish()
 
 		mockMutex := NewMockIAutoRenewMutex(ctrl)
-		mockMutex.EXPECT().Lock(gomock.Any()).Return(nil)
+		mockMutex.EXPECT().Lock(gomock.Any()).DoAndReturn(func(ctx context.Context) (context.Context, error) {
+			return ctx, nil
+		})
 		mockMutex.EXPECT().Unlock().Return(true, nil).AnyTimes()
 
 		// Setup multiple test messages
@@ -516,6 +574,146 @@ func TestGroupConsumer_MessageProcessing(t *testing.T) {
 		err = consumer.Close()
 		assert.NoError(t, err)
 	})
+
+	t.Run("message processing interrupted by lock loss", func(t *testing.T) {
+		defer goleak.VerifyNone(t)
+		client, mock, cleanup := setupTest(t)
+		defer cleanup()
+
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockMutex := NewMockIAutoRenewMutex(ctrl)
+		mockMutex.EXPECT().Lock(gomock.Any()).DoAndReturn(func(ctx context.Context) (context.Context, error) {
+			return ctx, nil
+		})
+		mockMutex.EXPECT().Unlock().Return(true, nil)
+
+		mock.ExpectXPendingExt(&redis.XPendingExtArgs{
+			Stream: "test-stream",
+			Group:  "test-group",
+			Start:  "-",
+			End:    "+",
+			Count:  100,
+		}).SetVal([]redis.XPendingExt{})
+
+		mock.ExpectXReadGroup(&redis.XReadGroupArgs{
+			Group:    "test-group",
+			Consumer: "test-consumer",
+			Streams:  []string{"test-stream", ">"},
+			Count:    1,
+			Block:    5 * time.Second,
+		}).SetErr(context.Canceled)
+
+		// 設置一個長時間的 block timeout
+		consumer, err := NewGroupConsumer[TestMessage](
+			client,
+			"test-stream",
+			"test-group",
+			"test-consumer",
+			WithGroupConsumerStrictOrdering[TestMessage](true),
+			WithGroupConsumerMutex[TestMessage](mockMutex),
+			WithGroupConsumerBlockTimeout[TestMessage](5*time.Second),
+		)
+		require.NoError(t, err)
+
+		err = consumer.Start()
+		require.NoError(t, err)
+
+		msgChan := consumer.Subscribe()
+
+		// 驗證 channel 是否正確關閉
+		select {
+		case _, ok := <-msgChan:
+			assert.False(t, ok, "channel should be closed after lock lost")
+		case <-time.After(100 * time.Millisecond):
+			t.Error("timeout waiting for channel close")
+		}
+
+		err = consumer.Close()
+		assert.NoError(t, err)
+	})
+
+	t.Run("concurrent message processing with lock context", func(t *testing.T) {
+		defer goleak.VerifyNone(t)
+		client, mock, cleanup := setupTest(t)
+		defer cleanup()
+
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockMutex := NewMockIAutoRenewMutex(ctrl)
+		mockMutex.EXPECT().Lock(gomock.Any()).DoAndReturn(func(ctx context.Context) (context.Context, error) {
+			return ctx, nil
+		})
+		mockMutex.EXPECT().Unlock().Return(true, nil)
+
+		// 設置 mock 期望
+		mock.ExpectXPendingExt(&redis.XPendingExtArgs{
+			Stream: "test-stream",
+			Group:  "test-group",
+			Start:  "-",
+			End:    "+",
+			Count:  100,
+		}).SetVal([]redis.XPendingExt{})
+
+		for i := range 3 {
+			msgData, err := DefaultParseToMessage(TestMessage{ID: fmt.Sprintf("%d", i), Data: fmt.Sprintf("test-%d", i)})
+			require.NoError(t, err)
+
+			mock.ExpectXReadGroup(&redis.XReadGroupArgs{
+				Group:    "test-group",
+				Consumer: "test-consumer",
+				Streams:  []string{"test-stream", ">"},
+				Count:    1,
+				Block:    time.Second,
+			}).SetVal([]redis.XStream{
+				{
+					Stream: "test-stream",
+					Messages: []redis.XMessage{
+						{
+							ID:     fmt.Sprintf("1234-%d", i),
+							Values: msgData,
+						},
+					},
+				},
+			})
+
+			mock.ExpectXAck("test-stream", "test-group", fmt.Sprintf("1234-%d", i)).SetVal(1)
+		}
+
+		// 使用較大的 buffer size
+		consumer, err := NewGroupConsumer[TestMessage](
+			client,
+			"test-stream",
+			"test-group",
+			"test-consumer",
+			WithGroupConsumerStrictOrdering[TestMessage](true),
+			WithGroupConsumerMutex[TestMessage](mockMutex),
+			WithGroupConsumerBufferSize[TestMessage](5),
+		)
+		require.NoError(t, err)
+
+		err = consumer.Start()
+		require.NoError(t, err)
+
+		msgChan := consumer.Subscribe()
+
+		for i := range 3 {
+			select {
+			case msg, ok := <-msgChan:
+				assert.True(t, ok, "channel should not be closed")
+				assert.Equal(t, TestMessage{ID: fmt.Sprintf("%d", i), Data: fmt.Sprintf("test-%d", i)}, msg.Data)
+				err = msg.Done(context.Background())
+				assert.NoError(t, err)
+			case <-time.After(1000 * time.Millisecond):
+				t.Fatalf("timeout waiting for message %d", i)
+			}
+		}
+
+		err = consumer.Close()
+		assert.NoError(t, err)
+	})
 }
 
 func TestGroupConsumer_PendingMessages(t *testing.T) {
@@ -528,7 +726,9 @@ func TestGroupConsumer_PendingMessages(t *testing.T) {
 		defer ctrl.Finish()
 
 		mockMutex := NewMockIAutoRenewMutex(ctrl)
-		mockMutex.EXPECT().Lock(gomock.Any()).Return(nil)
+		mockMutex.EXPECT().Lock(gomock.Any()).DoAndReturn(func(ctx context.Context) (context.Context, error) {
+			return ctx, nil
+		})
 		mockMutex.EXPECT().Unlock().Return(true, nil).AnyTimes()
 
 		testMsg := TestMessage{ID: "1", Data: "test"}
@@ -595,7 +795,9 @@ func TestGroupConsumer_PendingMessages(t *testing.T) {
 		defer ctrl.Finish()
 
 		mockMutex := NewMockIAutoRenewMutex(ctrl)
-		mockMutex.EXPECT().Lock(gomock.Any()).Return(nil)
+		mockMutex.EXPECT().Lock(gomock.Any()).DoAndReturn(func(ctx context.Context) (context.Context, error) {
+			return ctx, nil
+		})
 		mockMutex.EXPECT().Unlock().Return(true, nil)
 
 		// 模擬 XPendingExt 返回錯誤
@@ -620,7 +822,13 @@ func TestGroupConsumer_PendingMessages(t *testing.T) {
 		err = consumer.Start()
 		assert.NoError(t, err)
 
-		time.Sleep(100 * time.Millisecond)
+		msgCh := consumer.Subscribe()
+		select {
+		case _, ok := <-msgCh:
+			assert.False(t, ok, "channel should be closed")
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("timeout waiting for channel close")
+		}
 
 		err = consumer.Close()
 		assert.NoError(t, err)
@@ -730,5 +938,143 @@ func TestMessage_Done(t *testing.T) {
 		err := msg.Done(context.Background())
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "ack error")
+	})
+}
+
+func TestMessage_Fail(t *testing.T) {
+	t.Run("successful fail call", func(t *testing.T) {
+		client, mock, cleanup := setupTest(t)
+		defer cleanup()
+
+		msg := &Message[TestMessage]{
+			Data:      TestMessage{ID: "1", Data: "test"},
+			messageID: "1234-0",
+			stream:    "test-stream",
+			group:     "test-group",
+			client:    client,
+			raw:       map[string]any{"data": "test"},
+		}
+
+		// 期望消息被移動到死信隊列
+		mock.ExpectXAdd(&redis.XAddArgs{
+			Stream: "test-stream:dead-letter",
+			Values: map[string]any{
+				"data":  "test",
+				"error": "test error",
+			},
+		}).SetVal("dlq-1234-0")
+
+		// 期望原始消息被確認
+		mock.ExpectXAck("test-stream", "test-group", "1234-0").SetVal(1)
+
+		err := msg.Fail(context.Background(), errors.New("test error"))
+		assert.NoError(t, err)
+		assert.True(t, msg.done)
+	})
+
+	t.Run("multiple fail calls", func(t *testing.T) {
+		client, mock, cleanup := setupTest(t)
+		defer cleanup()
+
+		msg := &Message[TestMessage]{
+			Data:      TestMessage{ID: "1", Data: "test"},
+			messageID: "1234-0",
+			stream:    "test-stream",
+			group:     "test-group",
+			client:    client,
+			raw:       map[string]any{"data": "test"},
+		}
+
+		// 只應該呼叫一次XAdd和XAck
+		mock.ExpectXAdd(&redis.XAddArgs{
+			Stream: "test-stream:dead-letter",
+			Values: map[string]any{
+				"data":  "test",
+				"error": "test error",
+			},
+		}).SetVal("dlq-1234-0")
+		mock.ExpectXAck("test-stream", "test-group", "1234-0").SetVal(1)
+
+		// 第一次呼叫
+		err := msg.Fail(context.Background(), errors.New("test error"))
+		assert.NoError(t, err)
+
+		// 第二次呼叫應該直接返回nil
+		err = msg.Fail(context.Background(), errors.New("another error"))
+		assert.NoError(t, err)
+	})
+
+	t.Run("dead letter queue error", func(t *testing.T) {
+		client, mock, cleanup := setupTest(t)
+		defer cleanup()
+
+		msg := &Message[TestMessage]{
+			Data:      TestMessage{ID: "1", Data: "test"},
+			messageID: "1234-0",
+			stream:    "test-stream",
+			group:     "test-group",
+			client:    client,
+			raw:       map[string]any{},
+		}
+
+		// 模擬死信隊列寫入失敗
+		mock.ExpectXAdd(&redis.XAddArgs{
+			Stream: "test-stream:dead-letter",
+			Values: map[string]any{
+				"error": "test error",
+			},
+		}).SetErr(errors.New("dead letter queue error"))
+
+		err := msg.Fail(context.Background(), errors.New("test error"))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "dead letter queue error")
+		assert.False(t, msg.done)
+	})
+
+	t.Run("ack error after dead letter", func(t *testing.T) {
+		client, mock, cleanup := setupTest(t)
+		defer cleanup()
+
+		msg := &Message[TestMessage]{
+			Data:      TestMessage{ID: "1", Data: "test"},
+			messageID: "1234-0",
+			stream:    "test-stream",
+			group:     "test-group",
+			client:    client,
+			raw:       map[string]any{},
+		}
+
+		// 死信隊列寫入成功但ack失敗
+		mock.ExpectXAdd(&redis.XAddArgs{
+			Stream: "test-stream:dead-letter",
+			Values: map[string]any{
+				"error": "test error",
+			},
+		}).SetVal("dlq-1234-0")
+		mock.ExpectXAck("test-stream", "test-group", "1234-0").SetErr(errors.New("ack error"))
+
+		err := msg.Fail(context.Background(), errors.New("test error"))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "ack error")
+		assert.False(t, msg.done)
+	})
+
+	t.Run("fail after done", func(t *testing.T) {
+		client, _, cleanup := setupTest(t)
+		defer cleanup()
+
+		msg := &Message[TestMessage]{
+			Data:      TestMessage{ID: "1", Data: "test"},
+			messageID: "1234-0",
+			stream:    "test-stream",
+			group:     "test-group",
+			client:    client,
+			raw:       map[string]any{"data": "test"},
+			done:      true,
+		}
+
+		// 不應該有任何Redis操作
+		err := msg.Fail(context.Background(), errors.New("test error"))
+		assert.NoError(t, err)
 	})
 }
