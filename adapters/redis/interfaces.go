@@ -29,7 +29,7 @@ type IConsumer[T any] interface {
 
 // IAutoRenewMutex 定義了 AutoRenewMutex 的操作介面
 type IAutoRenewMutex interface {
-	Lock(ctx context.Context) error
+	Lock(ctx context.Context) (context.Context, error)
 	Unlock() (bool, error)
 	Valid() bool
 }

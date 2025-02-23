@@ -374,7 +374,8 @@ func (impl *ServerImpl) PostAuctionItemItemIDBids(ctx context.Context, request o
 	// 取得Redis上商品的出價鎖
 	lockKey := fmt.Sprintf("%sauction:%s:lock", impl.config.Redis.KeyPrefix, request.ItemID)
 	dMutex := redisAdapter.NewAutoRenewMutex(impl.redisClient, lockKey)
-	if err := dMutex.Lock(ctx); err != nil {
+	lockCtx, err := dMutex.Lock(ctx)
+	if err != nil {
 		return nil, fmt.Errorf("[%s] Fail to acquire bid lock, err=%w", op, err)
 	}
 	defer func() {
@@ -402,7 +403,7 @@ func (impl *ServerImpl) PostAuctionItemItemIDBids(ctx context.Context, request o
 	bidInfoBase64 := base64.StdEncoding.EncodeToString(bidInfoBytes)
 	expireTime := impl.config.Redis.ExpireTime.Seconds()
 	// 透過Lua script來處理出價
-	status, err := BidScript.Run(ctx, impl.redisClient, []string{auctionKey, impl.config.Redis.StreamKeys.BidStream}, request.Body.Bid, bidInfoBase64, expireTime).Int()
+	status, err := BidScript.Run(lockCtx, impl.redisClient, []string{auctionKey, impl.config.Redis.StreamKeys.BidStream}, request.Body.Bid, bidInfoBase64, expireTime).Int()
 	if err != nil {
 		return nil, fmt.Errorf("[%s] Fail to place bid, err=%w", op, err)
 	}
@@ -423,12 +424,12 @@ func (impl *ServerImpl) PostAuctionItemItemIDBids(ctx context.Context, request o
 	if auction.CurrentBidID != nil {
 		currentBid = auction.CurrentBid.Amount
 	}
-	if err := impl.redisClient.Set(ctx, auctionKey, currentBid, impl.config.Redis.ExpireTime).Err(); err != nil {
+	if err := impl.redisClient.Set(lockCtx, auctionKey, currentBid, impl.config.Redis.ExpireTime).Err(); err != nil {
 		return nil, fmt.Errorf("[%s] Fail to update current bid in Redis, err=%w", op, err)
 	}
 
 	// 再次透過Lua script來處理出價
-	status, err = BidScript.Run(ctx, impl.redisClient, []string{auctionKey, impl.config.Redis.StreamKeys.BidStream}, request.Body.Bid, bidInfoBase64, expireTime).Int()
+	status, err = BidScript.Run(lockCtx, impl.redisClient, []string{auctionKey, impl.config.Redis.StreamKeys.BidStream}, request.Body.Bid, bidInfoBase64, expireTime).Int()
 	if err != nil {
 		return nil, fmt.Errorf("[%s] Fail to place bid, err=%w", op, err)
 	}

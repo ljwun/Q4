@@ -67,12 +67,21 @@ func TestAutoRenewMutex_Lock(t *testing.T) {
 		mock.Regexp().ExpectEvalSha(".*", []string{"test-lock"}, []string{".*"}).SetVal(int64(1))
 
 		mutex := NewAutoRenewMutex(client, "test-lock")
-		err := mutex.Lock(context.Background())
+		lockCtx, err := mutex.Lock(context.Background())
 		assert.NoError(t, err)
+		assert.NotNil(t, lockCtx)
 
+		// Test if context is cancelled when lock is released
 		ok, err := mutex.Unlock()
 		assert.NoError(t, err)
 		assert.True(t, ok)
+
+		select {
+		case <-lockCtx.Done():
+			// Expected: context should be cancelled
+		case <-time.After(100 * time.Millisecond):
+			t.Error("lock context was not cancelled after unlock")
+		}
 	})
 
 	t.Run("lock with context cancellation", func(t *testing.T) {
@@ -83,8 +92,9 @@ func TestAutoRenewMutex_Lock(t *testing.T) {
 		mutex := NewAutoRenewMutex(client, "test-lock")
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		err := mutex.Lock(ctx)
+		lockCtx, err := mutex.Lock(ctx)
 		assert.ErrorIs(t, err, context.Canceled)
+		assert.Nil(t, lockCtx)
 	})
 
 	t.Run("lock with redis error and skip error enabled", func(t *testing.T) {
@@ -97,8 +107,9 @@ func TestAutoRenewMutex_Lock(t *testing.T) {
 		defer cancel()
 
 		mutex := NewAutoRenewMutex(client, "test-lock", WithAutoRenewMutexSkipLockError(true))
-		err := mutex.Lock(ctx)
+		lockCtx, err := mutex.Lock(ctx)
 		assert.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.Nil(t, lockCtx)
 	})
 
 	t.Run("lock with redis error and skip error disabled", func(t *testing.T) {
@@ -109,9 +120,10 @@ func TestAutoRenewMutex_Lock(t *testing.T) {
 		mock.Regexp().ExpectSetNX("test-lock", ".*", 8*time.Second).SetErr(redis.ErrClosed)
 
 		mutex := NewAutoRenewMutex(client, "test-lock")
-		err := mutex.Lock(context.Background())
+		lockCtx, err := mutex.Lock(context.Background())
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, redis.ErrClosed)
+		assert.Nil(t, lockCtx)
 	})
 
 	t.Run("double lock", func(t *testing.T) {
@@ -128,14 +140,16 @@ func TestAutoRenewMutex_Lock(t *testing.T) {
 		mock.Regexp().ExpectEvalSha(".*", []string{"test-lock"}, []string{".*"}).SetVal(int64(1))
 
 		mutex := NewAutoRenewMutex(client, "test-lock", WithAutoRenewMutexRetryDelay(time.Second))
-		err := mutex.Lock(context.Background())
+		lockCtx, err := mutex.Lock(context.Background())
 		require.NoError(t, err)
+		assert.NotNil(t, lockCtx)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 		defer cancel()
-		err = mutex.Lock(ctx)
+		lockCtx, err = mutex.Lock(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.Nil(t, lockCtx)
 
 		ok, err := mutex.Unlock()
 		assert.NoError(t, err)
@@ -161,8 +175,9 @@ func TestAutoRenewMutex_AutoRenew(t *testing.T) {
 			WithAutoRenewMutexExpiry(2*time.Second),
 			WithAutoRenewMutexRenewInterval(100*time.Millisecond))
 
-		err := mutex.Lock(context.Background())
+		lockCtx, err := mutex.Lock(context.Background())
 		require.NoError(t, err)
+		assert.NotNil(t, lockCtx)
 
 		time.Sleep(250 * time.Millisecond)
 		assert.True(t, mutex.Valid())
@@ -171,6 +186,12 @@ func TestAutoRenewMutex_AutoRenew(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, ok)
 
+		select {
+		case <-lockCtx.Done():
+			// Expected: context should be cancelled
+		case <-time.After(100 * time.Millisecond):
+			t.Error("lock context was not cancelled after unlock")
+		}
 	})
 
 	t.Run("auto renew fails", func(t *testing.T) {
@@ -189,8 +210,9 @@ func TestAutoRenewMutex_AutoRenew(t *testing.T) {
 			WithAutoRenewMutexExpiry(2*time.Second),
 			WithAutoRenewMutexRenewInterval(100*time.Millisecond))
 
-		err := mutex.Lock(context.Background())
+		lockCtx, err := mutex.Lock(context.Background())
 		require.NoError(t, err)
+		assert.NotNil(t, lockCtx)
 
 		time.Sleep(150 * time.Millisecond)
 		assert.False(t, mutex.Valid())
@@ -198,6 +220,13 @@ func TestAutoRenewMutex_AutoRenew(t *testing.T) {
 		ok, err := mutex.Unlock()
 		assert.ErrorIs(t, err, redsync.ErrLockAlreadyExpired)
 		assert.False(t, ok)
+
+		select {
+		case <-lockCtx.Done():
+			// Expected: context should be cancelled
+		case <-time.After(100 * time.Millisecond):
+			t.Error("lock context was not cancelled after unlock")
+		}
 	})
 }
 
@@ -213,12 +242,20 @@ func TestAutoRenewMutex_Unlock(t *testing.T) {
 		mock.Regexp().ExpectEvalSha(".*", []string{"test-lock"}, []string{".*"}).SetVal(int64(1))
 
 		mutex := NewAutoRenewMutex(client, "test-lock")
-		err := mutex.Lock(context.Background())
+		lockCtx, err := mutex.Lock(context.Background())
 		require.NoError(t, err)
+		assert.NotNil(t, lockCtx)
 
 		ok, err := mutex.Unlock()
 		assert.NoError(t, err)
 		assert.True(t, ok)
+
+		select {
+		case <-lockCtx.Done():
+			// Expected: context should be cancelled
+		case <-time.After(100 * time.Millisecond):
+			t.Error("lock context was not cancelled after unlock")
+		}
 	})
 
 	t.Run("unlock without lock", func(t *testing.T) {
@@ -248,12 +285,20 @@ func TestAutoRenewMutex_Unlock(t *testing.T) {
 		mock.Regexp().ExpectEvalSha(".*", []string{"test-lock"}, []string{".*"}).SetVal(int64(-1))
 
 		mutex := NewAutoRenewMutex(client, "test-lock")
-		err := mutex.Lock(context.Background())
+		lockCtx, err := mutex.Lock(context.Background())
 		require.NoError(t, err)
+		assert.NotNil(t, lockCtx)
 
 		ok, err := mutex.Unlock()
 		assert.NoError(t, err)
 		assert.True(t, ok)
+
+		select {
+		case <-lockCtx.Done():
+			// Expected: context should be cancelled
+		case <-time.After(100 * time.Millisecond):
+			t.Error("lock context was not cancelled after unlock")
+		}
 
 		ok, err = mutex.Unlock()
 		assert.Error(t, err)
@@ -280,8 +325,9 @@ func TestAutoRenewMutex_Valid(t *testing.T) {
 		assert.False(t, mutex.Valid())
 
 		// 鎖定後
-		err := mutex.Lock(context.Background())
+		lockCtx, err := mutex.Lock(context.Background())
 		require.NoError(t, err)
+		assert.NotNil(t, lockCtx)
 		assert.True(t, mutex.Valid())
 
 		// 解鎖後
@@ -289,5 +335,12 @@ func TestAutoRenewMutex_Valid(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, ok)
 		assert.False(t, mutex.Valid())
+
+		select {
+		case <-lockCtx.Done():
+			// Expected: context should be cancelled
+		case <-time.After(100 * time.Millisecond):
+			t.Error("lock context was not cancelled after unlock")
+		}
 	})
 }

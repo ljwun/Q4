@@ -231,11 +231,12 @@ func (m *MockIAutoRenewMutex) EXPECT() *MockIAutoRenewMutexMockRecorder {
 }
 
 // Lock mocks base method.
-func (m *MockIAutoRenewMutex) Lock(ctx context.Context) error {
+func (m *MockIAutoRenewMutex) Lock(ctx context.Context) (context.Context, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Lock", ctx)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret0, _ := ret[0].(context.Context)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // Lock indicates an expected call of Lock.

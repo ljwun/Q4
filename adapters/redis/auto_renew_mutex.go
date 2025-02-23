@@ -14,11 +14,11 @@ import (
 
 type AutoRenewMutex struct {
 	*redsync.Mutex
-	stopRenew chan struct{}
-	renewing  bool
-	mu        sync.Mutex
-	wg        sync.WaitGroup
-	options   autoRenewMutexOptions
+	cancel   context.CancelFunc
+	renewing bool
+	mu       sync.Mutex
+	wg       sync.WaitGroup
+	options  autoRenewMutexOptions
 }
 
 type autoRenewMutexOptions struct {
@@ -89,32 +89,32 @@ func NewAutoRenewMutex(client *redis.Client, key string, opts ...AutoRenewMutexO
 	)
 
 	return &AutoRenewMutex{
-		Mutex:     mutex,
-		stopRenew: make(chan struct{}),
-		options:   options,
+		Mutex:   mutex,
+		options: options,
 	}
 }
 
 // Lock 獲取鎖並啟動自動續期，支持通過context取消
-func (m *AutoRenewMutex) Lock(ctx context.Context) error {
-	// NOTE: 不確定原因，但如果初始使用0值的time.Timer，就算context被關閉也有機會觸發LockContext
+func (m *AutoRenewMutex) Lock(ctx context.Context) (context.Context, error) {
 	timer := time.NewTimer(1)
 	defer timer.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil, ctx.Err()
 		case <-timer.C:
 			err := m.Mutex.LockContext(ctx)
 			if err == nil {
-				m.startAutoRenew()
-				return nil
+				lockCtx, cancel := context.WithCancel(ctx)
+				m.cancel = cancel
+				m.startAutoRenew(lockCtx)
+				return lockCtx, nil
 			}
 			// 只有在獲取鎖失敗或設置了忽略錯誤(skipLockError)時才重試
 			var commErr *redsync.RedisError
 			if !m.options.skipLockError && errors.As(err, &commErr) {
-				return fmt.Errorf("failed to acquire lock: %w", err)
+				return nil, fmt.Errorf("failed to acquire lock: %w", err)
 			}
 			// 重置計時器，準備下次重試
 			timer.Reset(m.options.retryDelay)
@@ -126,7 +126,6 @@ func (m *AutoRenewMutex) Lock(ctx context.Context) error {
 func (m *AutoRenewMutex) Unlock() (bool, error) {
 	m.stopAutoRenew()
 	m.wg.Wait()
-	m.stopRenew = make(chan struct{})
 	return m.Mutex.Unlock()
 }
 
@@ -135,7 +134,7 @@ func (m *AutoRenewMutex) Valid() bool {
 	return time.Now().Before(m.Mutex.Until()) && m.renewing
 }
 
-func (m *AutoRenewMutex) startAutoRenew() {
+func (m *AutoRenewMutex) startAutoRenew(ctx context.Context) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -152,7 +151,7 @@ func (m *AutoRenewMutex) startAutoRenew() {
 
 		for {
 			select {
-			case <-m.stopRenew:
+			case <-ctx.Done():
 				return
 			case <-ticker.C:
 				success, err := m.Mutex.Extend()
@@ -174,5 +173,7 @@ func (m *AutoRenewMutex) stopAutoRenew() {
 	}
 
 	m.renewing = false
-	close(m.stopRenew)
+	if m.cancel != nil {
+		m.cancel()
+	}
 }
