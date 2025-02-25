@@ -129,10 +129,13 @@ func (cm *ConnectionManager[T]) Start() {
 	cm.active = true
 	ctx, cancel := context.WithCancel(context.Background())
 	cm.cancel = cancel
+	cm.logger.Info("ConnectionManager started")
+
 	// 啟動訊息處理的 goroutine
 	cm.wg.Add(1)
 	go func() {
 		defer cm.wg.Done()
+		defer cm.logger.Info("ConnectionManager stopped")
 		upstream := cm.subscriber.Subscribe()
 		for {
 			select {
@@ -142,6 +145,7 @@ func (cm *ConnectionManager[T]) Start() {
 				if !ok {
 					continue
 				}
+				cm.logger.Debug("received message", slog.Any("message", msg))
 				cm.mu.RLock()
 				if channel, ok := cm.channels[msg.Channel]; ok {
 					channel.Broadcast(msg.Message)
