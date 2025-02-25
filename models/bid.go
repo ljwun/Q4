@@ -8,7 +8,7 @@ import (
 // Bid 代表拍賣商品的出價紀錄
 // 記錄每次競標的金額、競標者和競標商品
 type Bid struct {
-	*gorm.Model
+	gorm.Model
 
 	ID            uuid.UUID `gorm:"type:uuid;default:public.uuid_generate_v7();primaryKey;<-:false"`
 	Amount        uint32    `gorm:"type:integer;not null;<-:create"`

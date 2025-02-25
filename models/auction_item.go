@@ -10,7 +10,7 @@ import (
 // AuctionItem 代表拍賣系統中的商品
 // 包含商品資訊、起標價、目前最高出價、拍賣時間等資訊
 type AuctionItem struct {
-	*gorm.Model
+	gorm.Model
 
 	ID            uuid.UUID  `gorm:"type:uuid;default:public.uuid_generate_v7();primaryKey;<-:false"`
 	UserID        uuid.UUID  `gorm:"type:uuid;<-:create"`
