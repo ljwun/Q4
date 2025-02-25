@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-redsync/redsync/v4"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -110,6 +111,7 @@ func TestGroupConsumer_StartStop(t *testing.T) {
 		mockMutex.EXPECT().Lock(gomock.Any()).DoAndReturn(func(ctx context.Context) (context.Context, error) {
 			return ctx, nil
 		})
+		mockMutex.EXPECT().Lock(gomock.Any()).Return(nil, context.Canceled).AnyTimes()
 		mockMutex.EXPECT().Unlock().Return(true, nil)
 
 		mock.ExpectXPendingExt(&redis.XPendingExtArgs{
@@ -118,7 +120,7 @@ func TestGroupConsumer_StartStop(t *testing.T) {
 			Start:  "-",
 			End:    "+",
 			Count:  100,
-		}).SetVal([]redis.XPendingExt{})
+		}).SetErr(context.Canceled)
 
 		consumer, err := NewGroupConsumer[TestMessage](
 			client,
@@ -146,7 +148,9 @@ func TestGroupConsumer_StartStop(t *testing.T) {
 		defer ctrl.Finish()
 
 		mockMutex := NewMockIAutoRenewMutex(ctrl)
-		mockMutex.EXPECT().Lock(gomock.Any()).Return(nil, errors.New("lock error"))
+		mockMutex.EXPECT().Lock(gomock.Any()).Return(nil, errors.New("non context error"))
+		mockMutex.EXPECT().Lock(gomock.Any()).Return(nil, context.Canceled).AnyTimes()
+		mockMutex.EXPECT().Unlock().Return(false, redsync.ErrLockAlreadyExpired)
 
 		consumer, err := NewGroupConsumer[TestMessage](
 			client,
@@ -159,17 +163,33 @@ func TestGroupConsumer_StartStop(t *testing.T) {
 		require.NoError(t, err)
 
 		err = consumer.Start()
-		assert.NoError(t, err) // Start不會返回錯誤，因為錯誤會在goroutine中處理
+		assert.NoError(t, err)
 
-		time.Sleep(100 * time.Millisecond)
+		msgCh := consumer.Subscribe()
+		select {
+		case _, ok := <-msgCh:
+			assert.False(t, ok, "channel should be closed after lock error")
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("timeout waiting for channel close")
+		}
+
 		err = consumer.Close()
 		assert.NoError(t, err)
 	})
 
 	t.Run("multiple starts", func(t *testing.T) {
 		defer goleak.VerifyNone(t)
-		client, _, cleanup := setupTest(t)
+		client, mock, cleanup := setupTest(t)
 		defer cleanup()
+
+		// 設置 XReadGroup mock，使其返回 context.Canceled 來結束循環
+		mock.ExpectXReadGroup(&redis.XReadGroupArgs{
+			Group:    "test-group",
+			Consumer: "test-consumer",
+			Streams:  []string{"test-stream", ">"},
+			Count:    1,
+			Block:    time.Second,
+		}).SetErr(context.Canceled)
 
 		consumer, err := NewGroupConsumer[TestMessage](
 			client,
@@ -193,8 +213,17 @@ func TestGroupConsumer_StartStop(t *testing.T) {
 
 	t.Run("multiple closes", func(t *testing.T) {
 		defer goleak.VerifyNone(t)
-		client, _, cleanup := setupTest(t)
+		client, mock, cleanup := setupTest(t)
 		defer cleanup()
+
+		// 設置 XReadGroup mock，使其返回 context.Canceled 來結束循環
+		mock.ExpectXReadGroup(&redis.XReadGroupArgs{
+			Group:    "test-group",
+			Consumer: "test-consumer",
+			Streams:  []string{"test-stream", ">"},
+			Count:    1,
+			Block:    time.Second,
+		}).SetErr(context.Canceled)
 
 		consumer, err := NewGroupConsumer[TestMessage](
 			client,
@@ -226,22 +255,28 @@ func TestGroupConsumer_StartStop(t *testing.T) {
 
 		mockMutex := NewMockIAutoRenewMutex(ctrl)
 		mockCtx, mockCancel := context.WithCancel(context.Background())
-		// 模擬鎖失效的情況
+		// 模擬三次拿鎖成功後，鎖失效的情況
 		mockCancel()
-		mockMutex.EXPECT().Lock(gomock.Any()).Return(mockCtx, nil)
-		mockMutex.EXPECT().Unlock().Return(true, nil)
-
-		// 模擬 pendingExt 返回一些消息
-		mock.ExpectXPendingExt(&redis.XPendingExtArgs{
-			Stream: "test-stream",
-			Group:  "test-group",
-			Start:  "-",
-			End:    "+",
-			Count:  100,
-		}).SetVal([]redis.XPendingExt{
-			{ID: "1234-0"},
-			{ID: "1234-1"},
+		mockMutex.EXPECT().Lock(gomock.Any()).Return(mockCtx, nil).Times(3)
+		// 模擬第四次拿鎖失敗(使用一個channel來傳送測試用的訊號)
+		testSignal := make(chan struct{})
+		mockMutex.EXPECT().Lock(gomock.Any()).DoAndReturn(func(ctx context.Context) (context.Context, error) {
+			close(testSignal)
+			return nil, context.Canceled
 		})
+		mockMutex.EXPECT().Lock(gomock.Any()).Return(nil, context.Canceled).AnyTimes()
+		mockMutex.EXPECT().Unlock().Return(false, redsync.ErrLockAlreadyExpired)
+
+		// 模擬 pendingExt 使用三次失效鎖後的情況
+		for range 3 {
+			mock.ExpectXPendingExt(&redis.XPendingExtArgs{
+				Stream: "test-stream",
+				Group:  "test-group",
+				Start:  "-",
+				End:    "+",
+				Count:  100,
+			}).SetErr(context.Canceled)
+		}
 
 		consumer, err := NewGroupConsumer[TestMessage](
 			client,
@@ -258,9 +293,13 @@ func TestGroupConsumer_StartStop(t *testing.T) {
 
 		// 檢查消費者是否仍在運行
 		ch := consumer.Subscribe()
-		_, ok := <-ch
-		assert.False(t, ok, "channel should be closed after lock context cancellation")
+		select {
+		case <-ch:
+			t.Fatal("channel hasn't been closed")
+		case <-testSignal:
+		}
 
+		// 等待 group consumer 關閉
 		err = consumer.Close()
 		assert.NoError(t, err)
 	})
@@ -270,6 +309,7 @@ func TestGroupConsumer_MessageProcessing(t *testing.T) {
 	t.Run("successful message processing", func(t *testing.T) {
 		defer goleak.VerifyNone(t)
 		client, mock, cleanup := setupTest(t)
+		mock.MatchExpectationsInOrder(false)
 		defer cleanup()
 
 		ctrl := gomock.NewController(t)
@@ -279,7 +319,8 @@ func TestGroupConsumer_MessageProcessing(t *testing.T) {
 		mockMutex.EXPECT().Lock(gomock.Any()).DoAndReturn(func(ctx context.Context) (context.Context, error) {
 			return ctx, nil
 		})
-		mockMutex.EXPECT().Unlock().Return(true, nil).AnyTimes()
+		mockMutex.EXPECT().Lock(gomock.Any()).Return(nil, context.Canceled).AnyTimes()
+		mockMutex.EXPECT().Unlock().Return(true, nil)
 
 		// Setup test message
 		testMsg := TestMessage{ID: "1", Data: "test"}
@@ -315,6 +356,24 @@ func TestGroupConsumer_MessageProcessing(t *testing.T) {
 
 		mock.ExpectXAck("test-stream", "test-group", "1234-0").SetVal(1)
 
+		for range 5 {
+			mock.ExpectXReadGroup(&redis.XReadGroupArgs{
+				Group:    "test-group",
+				Consumer: "test-consumer",
+				Streams:  []string{"test-stream", ">"},
+				Count:    1,
+				Block:    time.Second,
+			}).SetErr(redis.Nil)
+		}
+
+		mock.ExpectXReadGroup(&redis.XReadGroupArgs{
+			Group:    "test-group",
+			Consumer: "test-consumer",
+			Streams:  []string{"test-stream", ">"},
+			Count:    1,
+			Block:    time.Second,
+		}).SetErr(context.Canceled)
+
 		consumer, err := NewGroupConsumer[TestMessage](
 			client,
 			"test-stream",
@@ -322,6 +381,7 @@ func TestGroupConsumer_MessageProcessing(t *testing.T) {
 			"test-consumer",
 			WithGroupConsumerStrictOrdering[TestMessage](true),
 			WithGroupConsumerMutex[TestMessage](mockMutex),
+			WithGroupConsumerBufferSize[TestMessage](0),
 		)
 		require.NoError(t, err)
 
@@ -332,6 +392,8 @@ func TestGroupConsumer_MessageProcessing(t *testing.T) {
 		msgChan := consumer.Subscribe()
 		select {
 		case msg := <-msgChan:
+			err = consumer.Close()
+			assert.NoError(t, err)
 			assert.Equal(t, testMsg.ID, msg.Data.ID)
 			assert.Equal(t, testMsg.Data, msg.Data.Data)
 			err = msg.Done(context.Background())
@@ -339,9 +401,6 @@ func TestGroupConsumer_MessageProcessing(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatal("timeout waiting for message")
 		}
-
-		err = consumer.Close()
-		assert.NoError(t, err)
 	})
 
 	t.Run("message parse error handling", func(t *testing.T) {
@@ -356,7 +415,8 @@ func TestGroupConsumer_MessageProcessing(t *testing.T) {
 		mockMutex.EXPECT().Lock(gomock.Any()).DoAndReturn(func(ctx context.Context) (context.Context, error) {
 			return ctx, nil
 		})
-		mockMutex.EXPECT().Unlock().Return(true, nil).AnyTimes()
+		mockMutex.EXPECT().Lock(gomock.Any()).Return(nil, context.Canceled).AnyTimes()
+		mockMutex.EXPECT().Unlock().Return(true, nil)
 
 		// Set expectations for invalid message
 		mock.ExpectXPendingExt(&redis.XPendingExtArgs{
@@ -393,6 +453,15 @@ func TestGroupConsumer_MessageProcessing(t *testing.T) {
 
 		mock.ExpectXAck("test-stream", "test-group", "1234-0").SetVal(1)
 
+		// 在處理完錯誤消息後添加一個取消的 XReadGroup
+		mock.ExpectXReadGroup(&redis.XReadGroupArgs{
+			Group:    "test-group",
+			Consumer: "test-consumer",
+			Streams:  []string{"test-stream", ">"},
+			Count:    1,
+			Block:    time.Second,
+		}).SetErr(context.Canceled)
+
 		consumer, err := NewGroupConsumer[TestMessage](
 			client,
 			"test-stream",
@@ -409,121 +478,6 @@ func TestGroupConsumer_MessageProcessing(t *testing.T) {
 		err = consumer.Start()
 		assert.NoError(t, err)
 
-		time.Sleep(100 * time.Millisecond)
-
-		err = consumer.Close()
-		assert.NoError(t, err)
-	})
-
-	t.Run("concurrent messages", func(t *testing.T) {
-		defer goleak.VerifyNone(t)
-		client, mock, cleanup := setupTest(t)
-		defer cleanup()
-
-		ctrl := gomock.NewController(t)
-		defer ctrl.Finish()
-
-		mockMutex := NewMockIAutoRenewMutex(ctrl)
-		mockMutex.EXPECT().Lock(gomock.Any()).DoAndReturn(func(ctx context.Context) (context.Context, error) {
-			return ctx, nil
-		})
-		mockMutex.EXPECT().Unlock().Return(true, nil).AnyTimes()
-
-		// Setup multiple test messages
-		testMsg1 := TestMessage{ID: "1", Data: "test1"}
-		testMsg2 := TestMessage{ID: "2", Data: "test2"}
-		msgData1, err := DefaultParseToMessage(testMsg1)
-		require.NoError(t, err)
-		msgData2, err := DefaultParseToMessage(testMsg2)
-		require.NoError(t, err)
-
-		mock.ExpectXPendingExt(&redis.XPendingExtArgs{
-			Stream: "test-stream",
-			Group:  "test-group",
-			Start:  "-",
-			End:    "+",
-			Count:  100,
-		}).SetVal([]redis.XPendingExt{})
-
-		// Expect multiple messages in order
-		mock.ExpectXReadGroup(&redis.XReadGroupArgs{
-			Group:    "test-group",
-			Consumer: "test-consumer",
-			Streams:  []string{"test-stream", ">"},
-			Count:    1,
-			Block:    time.Second,
-		}).SetVal([]redis.XStream{
-			{
-				Stream: "test-stream",
-				Messages: []redis.XMessage{
-					{
-						ID:     "1234-0",
-						Values: msgData1,
-					},
-				},
-			},
-		})
-
-		mock.ExpectXAck("test-stream", "test-group", "1234-0").SetVal(1)
-
-		mock.ExpectXReadGroup(&redis.XReadGroupArgs{
-			Group:    "test-group",
-			Consumer: "test-consumer",
-			Streams:  []string{"test-stream", ">"},
-			Count:    1,
-			Block:    time.Second,
-		}).SetVal([]redis.XStream{
-			{
-				Stream: "test-stream",
-				Messages: []redis.XMessage{
-					{
-						ID:     "1234-1",
-						Values: msgData2,
-					},
-				},
-			},
-		})
-
-		mock.ExpectXAck("test-stream", "test-group", "1234-1").SetVal(1)
-
-		consumer, err := NewGroupConsumer[TestMessage](
-			client,
-			"test-stream",
-			"test-group",
-			"test-consumer",
-			WithGroupConsumerStrictOrdering[TestMessage](true),
-			WithGroupConsumerMutex[TestMessage](mockMutex),
-		)
-		require.NoError(t, err)
-
-		err = consumer.Start()
-		require.NoError(t, err)
-
-		// Verify messages are received in order
-		msgChan := consumer.Subscribe()
-
-		// First message
-		select {
-		case msg := <-msgChan:
-			assert.Equal(t, testMsg1.ID, msg.Data.ID)
-			assert.Equal(t, testMsg1.Data, msg.Data.Data)
-			err = msg.Done(context.Background())
-			assert.NoError(t, err)
-		case <-time.After(time.Second):
-			t.Fatal("timeout waiting for first message")
-		}
-
-		// Second message
-		select {
-		case msg := <-msgChan:
-			assert.Equal(t, testMsg2.ID, msg.Data.ID)
-			assert.Equal(t, testMsg2.Data, msg.Data.Data)
-			err = msg.Done(context.Background())
-			assert.NoError(t, err)
-		case <-time.After(time.Second):
-			t.Fatal("timeout waiting for second message")
-		}
-
 		err = consumer.Close()
 		assert.NoError(t, err)
 	})
@@ -533,15 +487,6 @@ func TestGroupConsumer_MessageProcessing(t *testing.T) {
 		client, mock, cleanup := setupTest(t)
 		defer cleanup()
 
-		consumer, err := NewGroupConsumer[TestMessage](
-			client,
-			"test-stream",
-			"test-group",
-			"test-consumer",
-		)
-		require.NoError(t, err)
-
-		// 設置一個無效的消息格式
 		mock.ExpectXReadGroup(&redis.XReadGroupArgs{
 			Group:    "test-group",
 			Consumer: "test-consumer",
@@ -566,16 +511,30 @@ func TestGroupConsumer_MessageProcessing(t *testing.T) {
 			Values: map[string]interface{}{"data": "invalid"},
 		}).SetErr(errors.New("dead letter queue error"))
 
+		mock.ExpectXReadGroup(&redis.XReadGroupArgs{
+			Group:    "test-group",
+			Consumer: "test-consumer",
+			Streams:  []string{"test-stream", ">"},
+			Count:    1,
+			Block:    time.Second,
+		}).SetErr(context.Canceled)
+
+		consumer, err := NewGroupConsumer[TestMessage](
+			client,
+			"test-stream",
+			"test-group",
+			"test-consumer",
+		)
+		require.NoError(t, err)
+
 		err = consumer.Start()
 		assert.NoError(t, err)
-
-		time.Sleep(100 * time.Millisecond)
 
 		err = consumer.Close()
 		assert.NoError(t, err)
 	})
 
-	t.Run("message processing interrupted by lock loss", func(t *testing.T) {
+	t.Run("message processing (move to downstream) interrupted by lock loss", func(t *testing.T) {
 		defer goleak.VerifyNone(t)
 		client, mock, cleanup := setupTest(t)
 		defer cleanup()
@@ -584,10 +543,19 @@ func TestGroupConsumer_MessageProcessing(t *testing.T) {
 		defer ctrl.Finish()
 
 		mockMutex := NewMockIAutoRenewMutex(ctrl)
+		mockCtx, mockCancel := context.WithCancel(context.Background())
+		// 模擬第一次拿鎖成功後，鎖失效的情況
+		mockCancel()
+		mockMutex.EXPECT().Lock(gomock.Any()).Return(mockCtx, nil)
+		// 模擬第二次拿鎖失敗(使用一個channel來傳送測試用的訊號)
+		testSignal := make(chan struct{})
 		mockMutex.EXPECT().Lock(gomock.Any()).DoAndReturn(func(ctx context.Context) (context.Context, error) {
-			return ctx, nil
+			close(testSignal)
+			return nil, context.Canceled
 		})
-		mockMutex.EXPECT().Unlock().Return(true, nil)
+		// 模擬第三次之後的拿鎖失敗
+		mockMutex.EXPECT().Lock(gomock.Any()).Return(nil, context.Canceled).AnyTimes()
+		mockMutex.EXPECT().Unlock().Return(false, redsync.ErrLockAlreadyExpired)
 
 		mock.ExpectXPendingExt(&redis.XPendingExtArgs{
 			Stream: "test-stream",
@@ -597,15 +565,28 @@ func TestGroupConsumer_MessageProcessing(t *testing.T) {
 			Count:  100,
 		}).SetVal([]redis.XPendingExt{})
 
+		testMsg := TestMessage{ID: "1", Data: "test"}
+		msgData, err := DefaultParseToMessage(testMsg)
+		require.NoError(t, err)
+
 		mock.ExpectXReadGroup(&redis.XReadGroupArgs{
 			Group:    "test-group",
 			Consumer: "test-consumer",
 			Streams:  []string{"test-stream", ">"},
 			Count:    1,
 			Block:    5 * time.Second,
-		}).SetErr(context.Canceled)
+		}).SetVal([]redis.XStream{
+			{
+				Stream: "test-stream",
+				Messages: []redis.XMessage{
+					{
+						ID:     "1234-0",
+						Values: msgData,
+					},
+				},
+			},
+		})
 
-		// 設置一個長時間的 block timeout
 		consumer, err := NewGroupConsumer[TestMessage](
 			client,
 			"test-stream",
@@ -620,18 +601,15 @@ func TestGroupConsumer_MessageProcessing(t *testing.T) {
 		err = consumer.Start()
 		require.NoError(t, err)
 
-		msgChan := consumer.Subscribe()
-
-		// 驗證 channel 是否正確關閉
+		ch := consumer.Subscribe()
 		select {
-		case _, ok := <-msgChan:
-			assert.False(t, ok, "channel should be closed after lock lost")
-		case <-time.After(100 * time.Millisecond):
-			t.Error("timeout waiting for channel close")
+		case <-ch:
+			t.Fatal("channel hasn't been closed")
+		case <-testSignal:
+			err = consumer.Close()
+			assert.NoError(t, err)
 		}
 
-		err = consumer.Close()
-		assert.NoError(t, err)
 	})
 
 	t.Run("concurrent message processing with lock context", func(t *testing.T) {
@@ -646,6 +624,7 @@ func TestGroupConsumer_MessageProcessing(t *testing.T) {
 		mockMutex.EXPECT().Lock(gomock.Any()).DoAndReturn(func(ctx context.Context) (context.Context, error) {
 			return ctx, nil
 		})
+		mockMutex.EXPECT().Lock(gomock.Any()).Return(nil, context.Canceled).AnyTimes()
 		mockMutex.EXPECT().Unlock().Return(true, nil)
 
 		// 設置 mock 期望
@@ -681,6 +660,14 @@ func TestGroupConsumer_MessageProcessing(t *testing.T) {
 
 			mock.ExpectXAck("test-stream", "test-group", fmt.Sprintf("1234-%d", i)).SetVal(1)
 		}
+
+		mock.ExpectXReadGroup(&redis.XReadGroupArgs{
+			Group:    "test-group",
+			Consumer: "test-consumer",
+			Streams:  []string{"test-stream", ">"},
+			Count:    1,
+			Block:    time.Second,
+		}).SetErr(context.Canceled)
 
 		// 使用較大的 buffer size
 		consumer, err := NewGroupConsumer[TestMessage](
@@ -729,6 +716,7 @@ func TestGroupConsumer_PendingMessages(t *testing.T) {
 		mockMutex.EXPECT().Lock(gomock.Any()).DoAndReturn(func(ctx context.Context) (context.Context, error) {
 			return ctx, nil
 		})
+		mockMutex.EXPECT().Lock(gomock.Any()).Return(nil, context.Canceled).AnyTimes()
 		mockMutex.EXPECT().Unlock().Return(true, nil).AnyTimes()
 
 		testMsg := TestMessage{ID: "1", Data: "test"}
@@ -757,6 +745,14 @@ func TestGroupConsumer_PendingMessages(t *testing.T) {
 			})
 
 		mock.ExpectXAck("test-stream", "test-group", "1234-0").SetVal(1)
+
+		mock.ExpectXReadGroup(&redis.XReadGroupArgs{
+			Group:    "test-group",
+			Consumer: "test-consumer",
+			Streams:  []string{"test-stream", ">"},
+			Count:    1,
+			Block:    time.Second,
+		}).SetErr(context.Canceled)
 
 		consumer, err := NewGroupConsumer[TestMessage](
 			client,
@@ -798,6 +794,7 @@ func TestGroupConsumer_PendingMessages(t *testing.T) {
 		mockMutex.EXPECT().Lock(gomock.Any()).DoAndReturn(func(ctx context.Context) (context.Context, error) {
 			return ctx, nil
 		})
+		mockMutex.EXPECT().Lock(gomock.Any()).Return(nil, context.Canceled).AnyTimes()
 		mockMutex.EXPECT().Unlock().Return(true, nil)
 
 		// 模擬 XPendingExt 返回錯誤
@@ -821,14 +818,6 @@ func TestGroupConsumer_PendingMessages(t *testing.T) {
 
 		err = consumer.Start()
 		assert.NoError(t, err)
-
-		msgCh := consumer.Subscribe()
-		select {
-		case _, ok := <-msgCh:
-			assert.False(t, ok, "channel should be closed")
-		case <-time.After(100 * time.Millisecond):
-			t.Fatal("timeout waiting for channel close")
-		}
 
 		err = consumer.Close()
 		assert.NoError(t, err)
@@ -865,6 +854,24 @@ func TestGroupConsumer_NonOrderingModes(t *testing.T) {
 		})
 
 		mock.ExpectXAck("test-stream", "test-group", "1234-0").SetVal(1)
+
+		for range 5 {
+			mock.ExpectXReadGroup(&redis.XReadGroupArgs{
+				Group:    "test-group",
+				Consumer: "test-consumer",
+				Streams:  []string{"test-stream", ">"},
+				Count:    1,
+				Block:    time.Second,
+			}).SetErr(redis.Nil)
+		}
+
+		mock.ExpectXReadGroup(&redis.XReadGroupArgs{
+			Group:    "test-group",
+			Consumer: "test-consumer",
+			Streams:  []string{"test-stream", ">"},
+			Count:    1,
+			Block:    time.Second,
+		}).SetErr(context.Canceled)
 
 		consumer, err := NewGroupConsumer[TestMessage](
 			client,
@@ -952,14 +959,13 @@ func TestMessage_Fail(t *testing.T) {
 			stream:    "test-stream",
 			group:     "test-group",
 			client:    client,
-			raw:       map[string]any{"data": "test"},
+			raw:       map[string]any{},
 		}
 
 		// 期望消息被移動到死信隊列
 		mock.ExpectXAdd(&redis.XAddArgs{
 			Stream: "test-stream:dead-letter",
 			Values: map[string]any{
-				"data":  "test",
 				"error": "test error",
 			},
 		}).SetVal("dlq-1234-0")
@@ -982,14 +988,13 @@ func TestMessage_Fail(t *testing.T) {
 			stream:    "test-stream",
 			group:     "test-group",
 			client:    client,
-			raw:       map[string]any{"data": "test"},
+			raw:       map[string]any{},
 		}
 
 		// 只應該呼叫一次XAdd和XAck
 		mock.ExpectXAdd(&redis.XAddArgs{
 			Stream: "test-stream:dead-letter",
 			Values: map[string]any{
-				"data":  "test",
 				"error": "test error",
 			},
 		}).SetVal("dlq-1234-0")

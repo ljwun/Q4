@@ -198,78 +198,41 @@ func (s *GroupConsumer[T]) Start() error {
 		defer s.wg.Done()
 		defer s.logger.Info("group consumer goroutine stopped")
 		defer close(s.downStream)
-
-		// 如果是嚴格順序模式，拿到鎖後先獲取所有pending消息ID
-		if s.options.strictOrdering {
-			var err error
-			ctx, err = s.mutex.Lock(ctx)
-			if err != nil {
-				s.logger.Error("failed to acquire lock", slog.Any("error", err))
-				s.cancelFunc()
-				return
+		defer func() {
+			if s.options.strictOrdering {
+				s.mutex.Unlock()
 			}
-			defer s.mutex.Unlock()
-
-			if err := s.fetchPendingMessageIds(ctx); err != nil {
-				s.logger.Error("initial pending messages fetch failed", slog.Any("error", err))
-				s.cancelFunc()
-				return
-			}
-		}
+		}()
 
 		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				message, err := s.fetchNextMessage(ctx)
+			workloadContext := ctx
+
+			// 如果是嚴格順序模式下，會先拿鎖，然後再處理消息
+			if s.options.strictOrdering {
+				var err error
+				// workloadContext在嚴格順序模式下會被修改成帶鎖狀態的child context，可以接收到鎖的釋放信號
+				workloadContext, err = s.mutex.Lock(ctx)
 				if err != nil {
-					if errors.Is(err, redis.Nil) {
-						continue // 沒有新消息，正常情況
-					}
+					s.logger.Error("failed to acquire lock", slog.Any("error", err))
 					if errors.Is(err, context.Canceled) {
-						return // context被取消，直接返回
-					}
-					s.logger.Error("fetch message error", slog.Any("error", err))
-					continue
-				}
-
-				// 解析消息
-				data, err := s.options.parseFunc(message.Values)
-				if err != nil {
-					s.logger.Error("failed to parse message",
-						slog.String("messageId", message.ID),
-						slog.Any("error", err))
-
-					if err := s.moveToDeadLetter(ctx, message); err != nil {
-						if errors.Is(err, context.Canceled) {
-							return
-						}
-						s.logger.Error("error moving message to dead letter",
-							slog.String("messageId", message.ID),
-							slog.Any("error", err))
+						break
 					}
 					continue
 				}
-
-				// 準備發送到下游的消息
-				msg := &Message[T]{
-					Data:      data,
-					messageID: message.ID,
-					stream:    s.stream,
-					group:     s.group,
-					client:    s.client,
-					raw:       message.Values,
+			}
+			if err := s.messagesWorkflow(workloadContext); err != nil {
+				// 如果是context.Canceled，且是因為外部context取消，則退出循環
+				if errors.Is(err, context.Canceled) && ctx.Err() != nil {
+					break
 				}
-
-				if err := s.moveToDownStream(ctx, msg); err != nil {
-					if errors.Is(err, context.Canceled) {
-						return
-					}
-					s.logger.Error("error moving message to downstream",
-						slog.String("messageId", message.ID),
-						slog.Any("error", err))
+				if s.options.strictOrdering && errors.Is(err, context.Canceled) && ctx.Err() == nil {
+					// 如果是context.Canceled，且是因為鎖的context取消，則繼續循環
+					s.logger.Error("lock context cancelled, stopping current processing, restarting group consumer")
+				} else {
+					// 其他錯誤情況，重啟group consumer
+					s.logger.Error("error processing messages, stopping current processing, restarting group consumer", slog.Any("error", err))
 				}
+				continue
 			}
 		}
 	}()
@@ -293,6 +256,68 @@ func (s *GroupConsumer[T]) Close() error {
 	s.wg.Wait()
 	s.logger.Info("group consumer closed gracefully")
 	return nil
+}
+
+// messagesWorkflow 處理消息的工作流程
+func (s *GroupConsumer[T]) messagesWorkflow(ctx context.Context) error {
+	if s.options.strictOrdering {
+		if err := s.fetchPendingMessageIds(ctx); err != nil {
+			s.logger.Error("initial pending messages fetch failed", slog.Any("error", err))
+			return err
+		}
+	}
+	for {
+		message, err := s.fetchNextMessage(ctx)
+		if err != nil {
+			if errors.Is(err, redis.Nil) {
+				continue
+			}
+			s.logger.Error("fetch message error", slog.Any("error", err))
+			if errors.Is(err, context.Canceled) {
+				return err
+			}
+			// 其他的錯誤一般是server跟redis之間的通訊異常，重試即可
+			continue
+		}
+		data, err := s.options.parseFunc(message.Values)
+		if err != nil {
+			// 解析失敗的問題一個是原始資料，一個是解析方案，不管哪種都是需要額外處理的
+			// 不會因為重試就成功，因此先將消息移動到dead-letter，系統繼續處理下一條消息
+			s.logger.Error("failed to parse message",
+				slog.String("messageId", message.ID),
+				slog.Any("error", err),
+			)
+			if deadLetterErr := s.moveToDeadLetter(ctx, message); deadLetterErr != nil {
+				s.logger.Error("error moving message to dead letter",
+					slog.String("messageId", message.ID),
+					slog.Any("error", deadLetterErr),
+				)
+				// 如果在移動到dead-letter的過程中發生了異常，這個訊息會以pending的形式留在stream中
+				// WARN: 目前在嚴格順序模式下，這種狀況會在下一輪開始時優先處理這種訊息
+				// 		 但是在非嚴格順序模式下，會跳過pending訊息，一旦遇到這種狀況，訊息會一直以pending的形式留在stream中，需要手動對stream處理
+				return deadLetterErr
+			}
+			continue
+		}
+		msg := &Message[T]{
+			Data:      data,
+			messageID: message.ID,
+			stream:    s.stream,
+			group:     s.group,
+			client:    s.client,
+			raw:       message.Values,
+		}
+		if err := s.moveToDownStream(ctx, msg); err != nil {
+			s.logger.Error("error moving message to downstream",
+				slog.String("messageId", message.ID),
+				slog.Any("error", err),
+			)
+			// 如果在移動到downstream的過程中發生了異常(只有可能是context.Canceled)，這個訊息會以pending的形式留在stream中
+			// WARN: 目前在嚴格順序模式下，這種狀況會在下一輪開始時優先處理這種訊息
+			// 		 但是在非嚴格順序模式下，會跳過pending訊息，一旦遇到這種狀況，訊息會一直以pending的形式留在stream中，需要手動對stream處理
+			return err
+		}
+	}
 }
 
 func (s *GroupConsumer[T]) fetchPendingMessageIds(ctx context.Context) error {
@@ -387,6 +412,9 @@ func (s *GroupConsumer[T]) moveToDeadLetter(ctx context.Context, message redis.X
 
 // moveToDownStream 處理發送消息到下游channel
 func (s *GroupConsumer[T]) moveToDownStream(ctx context.Context, message *Message[T]) error {
+	if ctx.Err() != nil {
+		return context.Canceled
+	}
 	select {
 	case <-ctx.Done():
 		return context.Canceled
