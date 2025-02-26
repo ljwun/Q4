@@ -25,6 +25,10 @@ spec:
             # General
             - name: Q4_SERVER_URL
               value: "0.0.0.0:{{ .Values.api.port }}"
+            - name: Q4_INSTANCE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
             
             # OIDC settings
             {{- include "utils.envValue" (dict "name" "Q4_OIDC_ISSUER_URL" "data" .Values.api.oidc.issuerUrl "required" true) | nindent 12 }}
@@ -50,7 +54,10 @@ spec:
             {{- include "utils.envValue" (dict "name" "Q4_REDIS_ADDR" "data" .Values.api.redis.address "required" true) | nindent 12 }}
             {{- include "utils.envValue" (dict "name" "Q4_REDIS_PASSWORD" "data" .Values.api.redis.password "required" true) | nindent 12 }}
             {{- include "utils.envValue" (dict "name" "Q4_REDIS_DB" "data" .Values.api.redis.database "required" true) | nindent 12 }}
-            {{- include "utils.envValue" (dict "name" "Q4_REDIS_STREAM_KEY_FOR_SSE" "data" .Values.api.redis.streamKeys.SSE "required" true) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_REDIS_EXPIRE_TIME" "data" .Values.api.redis.expireTime "required" true) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_REDIS_KEY_PREFIX" "data" .Values.api.redis.keyPrefix "required" true) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_REDIS_CONSUMER_GROUP" "data" .Values.api.redis.consumerGroup "required" true) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_REDIS_STREAM_KEY_FOR_BID" "data" .Values.api.redis.streamKeys.bid "required" true) | nindent 12 }}
 
         - name: q4-ui
           image: {{ .Values.ui.image }}
