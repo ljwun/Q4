@@ -1,18 +1,18 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}-app
+  name: {{ .Release.Name }}-deployment
   labels:
     app: q4-app
 spec:
   replicas: {{ .Values.global.replicas }}
   selector:
     matchLabels:
-      app: q4-app
+      app: {{ .Release.Name }}
   template:
     metadata:
       labels:
-        app: q4-app
+        app: {{ .Release.Name }}
     spec:
       containers:
         - name: q4-api
