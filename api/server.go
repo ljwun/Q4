@@ -185,8 +185,14 @@ func (impl *ServerImpl) Start() {
 					if result := impl.db.Preload("CurrentBid.User").First(&auction); result.Error != nil {
 						return fmt.Errorf("fail to find auction item, err=%w", result.Error)
 					}
-					if auction.CurrentBid != nil && auction.CurrentBid.Amount < msg.Data.Amount || auction.CurrentBid == nil && auction.StartingPrice < msg.Data.Amount {
-						logger.Debug("Update current bid", slog.String("itemID", msg.Data.ItemID.String()), slog.Int64("from", int64(auction.CurrentBid.Amount)), slog.Int64("to", int64(msg.Data.Amount)))
+					var currentBid uint32
+					if auction.CurrentBid != nil {
+						currentBid = auction.CurrentBid.Amount
+					} else {
+						currentBid = auction.StartingPrice
+					}
+					if currentBid < msg.Data.Amount {
+						logger.Debug("Update current bid", slog.String("itemID", msg.Data.ItemID.String()), slog.Uint64("from", uint64(currentBid)), slog.Int64("to", int64(msg.Data.Amount)))
 						auction.CurrentBidID = &record.ID
 						auction.CurrentBid = &record
 						if result := impl.db.Save(&auction); result.Error != nil {
