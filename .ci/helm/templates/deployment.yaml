@@ -30,6 +30,12 @@ spec:
                 fieldRef:
                   fieldPath: metadata.name
             
+            # Auth settings
+            {{- include "utils.envValue" (dict "name" "Q4_AUTH_ISSUER" "data" .Values.api.auth.issuer "default" (printf "%s-api" .Release.Name)) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_AUTH_AUDIENCE" "data" .Values.api.auth.audience "default" (printf "%s-ui" .Release.Name)) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_AUTH_PRIVATE_KEY" "data" .Values.api.auth.privateKey "required" true) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_AUTH_EXPIRE_DURATION" "data" .Values.api.auth.expireDuration "required" true) | nindent 12 }}
+
             # OIDC settings
             {{- include "utils.envValue" (dict "name" "Q4_OIDC_ISSUER_URL" "data" .Values.api.oidc.issuerUrl "required" true) | nindent 12 }}
             {{- include "utils.envValue" (dict "name" "Q4_OIDC_CLIENT_ID" "data" .Values.api.oidc.clientId "required" true) | nindent 12 }}

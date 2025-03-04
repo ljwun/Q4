@@ -31,6 +31,29 @@ api:
   image: ghcr.io/ljwun/q4-api:v0.3.3
   # 服務端口
   port: 8080
+  # auth設定，必填
+  auth:
+    issuer:
+      value: ""
+      configMapName: ""
+      secretName: ""
+      key: ""
+    audience:
+      value: ""
+      configMapName: ""
+      secretName: ""
+      key: ""
+    # ed25519
+    privateKey:
+      value: ""
+      configMapName: ""
+      secretName: ""
+      key: ""
+    expireDuration:
+      value: ""
+      configMapName: ""
+      secretName: ""
+      key: ""
   # oidc設定，必填
   oidc:
     issuerUrl:
