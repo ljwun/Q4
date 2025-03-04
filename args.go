@@ -1,6 +1,10 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
+	"fmt"
 	"strings"
 	"time"
 
@@ -10,10 +14,22 @@ import (
 	"q4/api"
 )
 
-func ParseArgs() Args {
+func ParseArgs() (*Args, error) {
+	const op = "ParseArgs"
+
 	// server config
 	pflag.String("server-url", "0.0.0.0:8080", "")
 	pflag.String("instance-id", "", "")
+
+	// auth config
+	_, defaultPrivateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("%s: failed to generate default ed25519 private key: %w", op, err)
+	}
+	pflag.String("auth-issuer", "q4-api", "")
+	pflag.String("auth-audience", "q4-ui", "")
+	pflag.BytesBase64("auth-private-key", defaultPrivateKey, "")
+	pflag.Duration("auth-expire-duration", 3*time.Hour, "")
 
 	// oidc config
 	pflag.String("oidc-issuer-url", "", "")
@@ -53,11 +69,26 @@ func ParseArgs() Args {
 	viper.SetEnvPrefix("Q4")
 	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 
+	// parse arguments
+	authPrivateKey, err := base64.StdEncoding.DecodeString(viper.GetString("auth-private-key"))
+	if err != nil {
+		return nil, fmt.Errorf("%s: failed to decode auth private key: %w", op, err)
+	}
+	if len(authPrivateKey) != ed25519.PrivateKeySize {
+		return nil, fmt.Errorf("%s: invalid auth private key size", op)
+	}
+
 	// initial arguments
-	return Args{
+	return &Args{
 		ServerURL: viper.GetString("server-url"),
 		ServerConfig: api.ServerConfig{
 			ID: viper.GetString("instance-id"),
+			Auth: api.AuthConfig{
+				Issuer:         viper.GetString("auth-issuer"),
+				PrivateKey:     authPrivateKey,
+				Audience:       viper.GetString("auth-audience"),
+				ExpireDuration: viper.GetDuration("auth-expire-duration"),
+			},
 			OIDC: api.OIDCConfig{
 				IssuerURL:    viper.GetString("oidc-issuer-url"),
 				ClientID:     viper.GetString("oidc-client-id"),
@@ -90,7 +121,7 @@ func ParseArgs() Args {
 				},
 			},
 		},
-	}
+	}, nil
 }
 
 type Args struct {

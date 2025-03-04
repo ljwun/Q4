@@ -11,7 +11,10 @@ import (
 )
 
 func main() {
-	args := ParseArgs()
+	args, err := ParseArgs()
+	if err != nil {
+		panic(err)
+	}
 	if !args.Validate() {
 		panic("missing arguments")
 	}
