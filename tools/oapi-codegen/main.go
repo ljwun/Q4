@@ -1,5 +1,5 @@
 //go:generate mkdir -p ../../api/openapi
-//go:generate go run ./oapi-codegen.go
+//go:generate go run ./main.go
 
 package main
 
