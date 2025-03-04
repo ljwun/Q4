@@ -18,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/microcosm-cc/bluemonday"
 	"github.com/redis/go-redis/v9"
@@ -247,14 +248,14 @@ func (impl *ServerImpl) PostAuctionItem(ctx context.Context, request openapi.Pos
 		}, nil
 	}
 	// 檢查使用者是否有權限新增拍賣物品
+	//  - 檢查是否有提供access token
 	if request.Params.AccessToken == nil {
 		return openapi.PostAuctionItem401Response{}, nil
 	}
-	user, err := impl.oidcProvider.Introspect(*request.Params.AccessToken)
+	//  - 解析並驗證access token
+	token, err := openapi.ParseAndValidateJWT(*request.Params.AccessToken, impl.config.Auth.PrivateKey)
 	if err != nil {
-		return nil, fmt.Errorf("[%s] Fail to introspect token, err=%w", op, err)
-	}
-	if !user.Active {
+		slog.Error("Fail to parse and validate JWT", slog.String("op", op), slog.Any("error", err))
 		return openapi.PostAuctionItem401Response{}, nil
 	}
 	// 處理拍賣描述
@@ -275,12 +276,8 @@ func (impl *ServerImpl) PostAuctionItem(ctx context.Context, request openapi.Pos
 		request.Body.Carousels = lo.ToPtr([]string{})
 	}
 	// 儲存拍賣物品
-	dbUser := models.User{Username: user.Name}
-	if result := impl.db.First(&dbUser); result.Error != nil {
-		return nil, fmt.Errorf("[%s] Fail to find user, err=%w", op, result.Error)
-	}
 	auction := models.AuctionItem{
-		UserID:        dbUser.ID,
+		UserID:        uuid.MustParse(token.Subject),
 		Title:         request.Body.Title,
 		Description:   *request.Body.Description,
 		StartingPrice: uint32(*request.Body.StartingPrice),
@@ -362,19 +359,15 @@ func (impl *ServerImpl) PostAuctionItemItemIDBids(ctx context.Context, request o
 		return openapi.PostAuctionItemItemIDBids410JSONResponse{}, nil
 	}
 	// 檢查使用者是否可以出價
+	//  - 檢查是否有提供access token
 	if request.Params.AccessToken == nil {
 		return openapi.PostAuctionItemItemIDBids401Response{}, nil
 	}
-	user, err := impl.oidcProvider.Introspect(*request.Params.AccessToken)
+	//  - 解析並驗證access token
+	token, err := openapi.ParseAndValidateJWT(*request.Params.AccessToken, impl.config.Auth.PrivateKey)
 	if err != nil {
-		return nil, fmt.Errorf("[%s] Fail to introspect token, err=%w", op, err)
-	}
-	if !user.Active {
+		slog.Error("Fail to parse and validate JWT", slog.String("op", op), slog.Any("error", err))
 		return openapi.PostAuctionItemItemIDBids401Response{}, nil
-	}
-	dbUser := models.User{Username: user.Name}
-	if result := impl.db.First(&dbUser); result.Error != nil {
-		return nil, fmt.Errorf("[%s] Fail to find user, err=%w", op, result.Error)
 	}
 
 	// 取得Redis上商品的出價鎖
@@ -396,8 +389,8 @@ func (impl *ServerImpl) PostAuctionItemItemIDBids(ctx context.Context, request o
 	bidInfo := BidInfo{
 		ItemID: request.ItemID,
 		User: BidInfoUser{
-			ID:   dbUser.ID,
-			Name: dbUser.Username,
+			ID:   uuid.MustParse(token.Subject),
+			Name: token.Username,
 		},
 		Amount:    request.Body.Bid,
 		CreatedAt: time.Now(),
@@ -416,7 +409,7 @@ func (impl *ServerImpl) PostAuctionItemItemIDBids(ctx context.Context, request o
 	if status == 0 {
 		return openapi.PostAuctionItemItemIDBids400JSONResponse{}, nil
 	} else if status == 1 {
-		slog.Info("Higher bid occurs", slog.String("user", dbUser.ID.String()), slog.Int64("bid", int64(request.Body.Bid)), slog.String("auctionID", dbUser.ID.String()))
+		slog.Info("Higher bid occurs", slog.String("user", token.Subject), slog.Int64("bid", int64(request.Body.Bid)), slog.String("auctionID", auction.ID.String()))
 		return openapi.PostAuctionItemItemIDBids200Response{}, nil
 	} else if status != -1 {
 		return nil, fmt.Errorf("[%s] Invalid script return value: %d", op, status)
@@ -442,7 +435,7 @@ func (impl *ServerImpl) PostAuctionItemItemIDBids(ctx context.Context, request o
 	if status == 0 {
 		return openapi.PostAuctionItemItemIDBids400JSONResponse{}, nil
 	} else if status == 1 {
-		slog.Info("Higher bid occurs", slog.String("user", dbUser.ID.String()), slog.Int64("bid", int64(request.Body.Bid)), slog.String("auctionID", dbUser.ID.String()))
+		slog.Info("Higher bid occurs", slog.String("user", token.Subject), slog.Int64("bid", int64(request.Body.Bid)), slog.String("auctionID", auction.ID.String()))
 		return openapi.PostAuctionItemItemIDBids200Response{}, nil
 	} else if status != -1 {
 		return nil, fmt.Errorf("[%s] Invalid script return value: %d", op, status)
@@ -673,6 +666,23 @@ func (impl *ServerImpl) GetAuthCallback(ctx context.Context, request openapi.Get
 	if result.Error != nil {
 		return nil, fmt.Errorf("[%s] Fail to create user, err=%w", op, result.Error)
 	}
+	// 建立token
+	q4Token := jwt.NewWithClaims(&jwt.SigningMethodEd25519{}, openapi.JWT{
+		Username: idTokenClaims.Name,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(impl.config.Auth.ExpireDuration)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			NotBefore: jwt.NewNumericDate(time.Now()),
+			Issuer:    impl.config.Auth.Issuer,
+			Subject:   user.ID.String(),
+			ID:        uuid.NewString(),
+			Audience:  []string{impl.config.Auth.Audience},
+		},
+	})
+	q4TokenString, err := q4Token.SignedString(impl.config.Auth.PrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("[%s] Fail to sign JWT, err=%w", op, err)
+	}
 	// 設定cookie並導向
 	redirectUrl, err := url.Parse(request.Params.RedirectUrl)
 	if err != nil {
@@ -681,7 +691,7 @@ func (impl *ServerImpl) GetAuthCallback(ctx context.Context, request openapi.Get
 	return openapi.GetAuthCallback200Response{
 		Headers: openapi.GetAuthCallback200ResponseHeaders{
 			Location: redirectUrl.Query().Get("redirect_url"),
-			SetCookieAccessTokenHttpOnlySecureMaxAge10800: token.OAuth2Token.AccessToken,
+			SetCookieAccessTokenHttpOnlySecureMaxAge10800: q4TokenString,
 			SetCookieUsernameMaxAge10800:                  idTokenClaims.Nickname,
 		},
 	}, nil
@@ -720,14 +730,14 @@ func (impl *ServerImpl) GetAuthLogout(ctx context.Context, request openapi.GetAu
 func (impl *ServerImpl) PostImage(ctx context.Context, request openapi.PostImageRequestObject) (openapi.PostImageResponseObject, error) {
 	const op = "PostImage"
 	// 檢查使用者是否可以上傳圖片
+	//  - 檢查是否有提供access token
 	if request.Params.AccessToken == nil {
 		return openapi.PostImage401Response{}, nil
 	}
-	user, err := impl.oidcProvider.Introspect(*request.Params.AccessToken)
+	//  - 解析並驗證access token
+	_, err := openapi.ParseAndValidateJWT(*request.Params.AccessToken, impl.config.Auth.PrivateKey)
 	if err != nil {
-		return nil, fmt.Errorf("[%s] Fail to introspect token, err=%w", op, err)
-	}
-	if !user.Active {
+		slog.Error("Fail to parse and validate JWT", slog.String("op", op), slog.Any("error", err))
 		return openapi.PostImage401Response{}, nil
 	}
 	// 限制圖片
@@ -755,6 +765,7 @@ func (impl *ServerImpl) PostImage(ctx context.Context, request openapi.PostImage
 	if err != nil {
 		return nil, fmt.Errorf("[%s] Fail to upload image, err=%w", op, err)
 	}
+	// todo: 在DB紀錄圖片的上傳紀錄
 
 	return openapi.PostImage201Response{
 		Headers: openapi.PostImage201ResponseHeaders{

@@ -1,15 +1,26 @@
 package api
 
-import "time"
+import (
+	"crypto/ed25519"
+	"time"
+)
 
 type ServerConfig struct {
 	// 用於識別不同的服務實例
 	ID string
 
+	Auth  AuthConfig
 	OIDC  OIDCConfig
 	S3    S3Config
 	DB    DBConfig
 	Redis RedisConfig
+}
+
+type AuthConfig struct {
+	Issuer         string
+	Audience       string
+	PrivateKey     ed25519.PrivateKey
+	ExpireDuration time.Duration
 }
 
 type OIDCConfig struct {
