@@ -12,6 +12,7 @@ require (
 	github.com/gin-gonic/gin v1.10.0
 	github.com/go-redis/redismock/v9 v9.2.0
 	github.com/go-redsync/redsync/v4 v4.13.0
+	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/lib/pq v1.10.9
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/oapi-codegen/oapi-codegen/v2 v2.4.1
