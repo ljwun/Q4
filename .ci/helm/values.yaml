@@ -98,6 +98,11 @@ api:
       configMapName: ""
       secretName: ""
       key: ""
+    rateLimitPerHour:
+      value: ""
+      configMapName: ""
+      secretName: ""
+      key: ""
   # Database 設定，必填
   db:
     user:

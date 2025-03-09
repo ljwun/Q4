@@ -47,6 +47,7 @@ spec:
             {{- include "utils.envValue" (dict "name" "Q4_S3_PUBLIC_BASE_URL" "data" .Values.api.s3.publicBaseUrl "required" true) | nindent 12 }}
             {{- include "utils.envValue" (dict "name" "Q4_S3_ACCESS_KEY_ID" "data" .Values.api.s3.accessKeyId "required" true) | nindent 12 }}
             {{- include "utils.envValue" (dict "name" "Q4_S3_SECRET_ACCESS_KEY" "data" .Values.api.s3.secretAccessKey "required" true) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_S3_RATE_LIMIT_PER_HOUR" "data" .Values.api.s3.rateLimitPerHour "required" true) | nindent 12 }}
 
             # Database settings
             {{- include "utils.envValue" (dict "name" "Q4_DB_USER" "data" .Values.api.db.user "required" true) | nindent 12 }}
