@@ -735,10 +735,19 @@ func (impl *ServerImpl) PostImage(ctx context.Context, request openapi.PostImage
 		return openapi.PostImage401Response{}, nil
 	}
 	//  - 解析並驗證access token
-	_, err := openapi.ParseAndValidateJWT(*request.Params.AccessToken, impl.config.Auth.PrivateKey)
+	token, err := openapi.ParseAndValidateJWT(*request.Params.AccessToken, impl.config.Auth.PrivateKey)
 	if err != nil {
 		slog.Error("Fail to parse and validate JWT", slog.String("op", op), slog.Any("error", err))
 		return openapi.PostImage401Response{}, nil
+	}
+	//  - 檢查是否達到上傳限制
+	userId := uuid.MustParse(token.Subject)
+	var uploadedCount int64
+	if result := impl.db.Model(&models.Image{UploaderID: userId}).Where("created_at > ?", time.Now().Add(-1*time.Hour)).Count(&uploadedCount); result.Error != nil {
+		return nil, fmt.Errorf("[%s] Fail to count uploaded images, err=%w", op, result.Error)
+	}
+	if impl.config.S3.RateLimitPerHour > 0 && uploadedCount >= impl.config.S3.RateLimitPerHour {
+		return openapi.PostImage429Response{}, nil
 	}
 	// 限制圖片
 	// 	1. 小於5MB
@@ -765,8 +774,14 @@ func (impl *ServerImpl) PostImage(ctx context.Context, request openapi.PostImage
 	if err != nil {
 		return nil, fmt.Errorf("[%s] Fail to upload image, err=%w", op, err)
 	}
-	// todo: 在DB紀錄圖片的上傳紀錄
-
+	// 在DB紀錄圖片的上傳紀錄
+	image := models.Image{
+		UploaderID: userId,
+		Url:        url,
+	}
+	if result := impl.db.Create(&image); result.Error != nil {
+		return nil, fmt.Errorf("[%s] Fail to create image, err=%w", op, result.Error)
+	}
 	return openapi.PostImage201Response{
 		Headers: openapi.PostImage201ResponseHeaders{
 			Location: url,
