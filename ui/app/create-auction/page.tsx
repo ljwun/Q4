@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
-import { useToast  } from "@/hooks/use-toast"
+import { useToast } from "@/hooks/use-toast"
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
@@ -18,6 +18,7 @@ import createClient from "openapi-fetch";
 import type { paths } from "@/app/openapi/openapi"
 import { FileHandler } from '@/app/create-auction/file-handler'
 import { DateTimePicker } from "@/app/components/date-time-picker"
+import { LoginButton } from "@/app/components/context/nav-user-context"
 
 export default function CreateAuctionPage() {
   const router = useRouter()
@@ -35,20 +36,45 @@ export default function CreateAuctionPage() {
         'Content-Type': file.type,
       },
     });
-    if (error) {
-      console.error('Failed to upload image:', error);
-      toast({
-        title: "上傳失敗",
-        description: "無法上傳圖片，請稍後再試。",
-        variant: "destructive",
-      });
-      return null;
+    switch (response.status) {
+      case 201:
+        toast({
+          title: "上傳成功",
+          description: "圖片上傳成功。",
+        });
+        return response.headers.get('Location')
+      case 400:
+        toast({
+          title: "上傳失敗",
+          description: "無法上傳圖片，圖片不符合上傳條件。",
+          variant: "destructive",
+        });
+        break
+      case 401:
+        toast({
+          title: '上傳失敗',
+          description: '請先登入',
+          variant: 'destructive',
+          action: <LoginButton>登入</LoginButton>
+        });
+        break
+      case 429:
+        toast({
+          title: '上傳失敗',
+          description: '上傳次數過多，請過段時間後再上傳',
+          variant: 'destructive'
+        });
+        break
+      default:
+        toast({
+          title: '上傳失敗',
+          description: '無法上傳圖片，請稍後再試',
+          variant: 'destructive'
+        });
+        console.error('Failed to bid:', error);
+        break
     }
-    toast({
-      title: "上傳成功",
-      description: "圖片上傳成功。",
-    });
-    return response.headers.get('Location');
+    return null;
   }
   const editor = useEditor({
     extensions: [
@@ -78,7 +104,7 @@ export default function CreateAuctionPage() {
       .filter((uri, index, self) => uri && self.indexOf(uri) === index) || [];
 
     const formData = new FormData(event.currentTarget)
-    const { error, response} = await client.POST("/auction/item", {
+    const { error, response } = await client.POST("/auction/item", {
       body: {
         title: formData.get('title') as string,
         startingPrice: parseInt(formData.get('startingPrice') as string, 10),
@@ -152,7 +178,7 @@ export default function CreateAuctionPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="endTime">結束時間</Label>
-              <DateTimePicker name="endTime" defaultDate={new Date(new Date().getTime() + 5*3600000)} required />
+              <DateTimePicker name="endTime" defaultDate={new Date(new Date().getTime() + 5 * 3600000)} required />
             </div>
             <div className="space-y-2">
               <Label htmlFor="description">描述</Label>
