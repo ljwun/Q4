@@ -591,3 +591,5 @@ paths:
                 $ref: "#/components/schemas/ApiResponse"
         '401':
           description: Unauthorized access.
+        '429':
+          description: Too many requests.
