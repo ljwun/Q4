@@ -35,6 +35,8 @@ type S3Config struct {
 	Endpoint        string
 	Bucket          string
 	PublicBaseURL   string
+
+	RateLimitPerHour int64
 }
 
 type DBConfig struct {

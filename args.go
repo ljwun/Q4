@@ -42,6 +42,7 @@ func ParseArgs() (*Args, error) {
 	pflag.String("s3-public-base-url", "", "")
 	pflag.String("s3-access-key-id", "", "")
 	pflag.String("s3-secret-access-key", "", "")
+	pflag.Int64("s3-rate-limit-per-hour", 3, "")
 
 	// db config
 	pflag.String("db-user", "", "")
@@ -95,11 +96,12 @@ func ParseArgs() (*Args, error) {
 				ClientSecret: viper.GetString("oidc-client-secret"),
 			},
 			S3: api.S3Config{
-				Endpoint:        viper.GetString("s3-endpoint"),
-				Bucket:          viper.GetString("s3-bucket"),
-				PublicBaseURL:   viper.GetString("s3-public-base-url"),
-				AccessKeyID:     viper.GetString("s3-access-key-id"),
-				SecretAccessKey: viper.GetString("s3-secret-access-key"),
+				Endpoint:         viper.GetString("s3-endpoint"),
+				Bucket:           viper.GetString("s3-bucket"),
+				PublicBaseURL:    viper.GetString("s3-public-base-url"),
+				AccessKeyID:      viper.GetString("s3-access-key-id"),
+				SecretAccessKey:  viper.GetString("s3-secret-access-key"),
+				RateLimitPerHour: viper.GetInt64("s3-rate-limit-per-hour"),
 			},
 			DB: api.DBConfig{
 				User:     viper.GetString("db-user"),
