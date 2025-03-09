@@ -1,3 +1,13 @@
+variable "target_db" {
+  type    = string
+  default = getenv("TARGET_DB_DSN")
+}
+
+variable "dev_db" {
+  type    = string
+  default = getenv("DEV_DB_DSN")
+}
+
 data "external_schema" "gorm" {
   program = [
     "go",
@@ -5,16 +15,16 @@ data "external_schema" "gorm" {
     "-mod=mod",
     "ariga.io/atlas-provider-gorm",
     "load",
-    "--path", "./",
+    "--path", "./models/",
     "--dialect", "postgres",
   ]
 }
 env "gorm" {
   src = data.external_schema.gorm.url
-  url = "${TARGET_DB_DSN}"
-  dev = "${DEV_DB_DSN}"
+  url = var.target_db
+  dev = var.dev_db
   migration {
-    dir = "file://../.ci/migrations"
+    dir = "file://.ci/migrations"
   }
   format {
     migrate {
