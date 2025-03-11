@@ -6,7 +6,6 @@ import createClient from "openapi-fetch";
 import type { paths } from "@/app/openapi/openapi";
 import { usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { makeCallbackUrl } from '@/app/constants';
 import { useToast } from '@/hooks/use-toast';
 
 type UserContextType = {
@@ -56,7 +55,8 @@ export function LoginButton({
         const { error, response } = await client.GET("/auth/login", {
             params: {
                 query: {
-                    redirect_url: makeCallbackUrl(new URL(location.href)),
+                    redirectUrl: new URL("/callback", location.origin).toString(),
+                    urlBeforeLogin: location.href,
                 },
             },
         });
