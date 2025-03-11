@@ -10,7 +10,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"sync"
 	"time"
 
@@ -32,6 +31,7 @@ import (
 	"q4/adapters/oidc"
 	redisAdapter "q4/adapters/redis"
 	internalS3 "q4/adapters/s3"
+	"q4/adapters/session"
 	"q4/adapters/sse"
 	"q4/api/openapi"
 	"q4/models"
@@ -641,17 +641,20 @@ func (impl *ServerImpl) GetAuctionItems(ctx context.Context, request openapi.Get
 // (GET /auth/callback)
 func (impl *ServerImpl) GetAuthCallback(ctx context.Context, request openapi.GetAuthCallbackRequestObject) (openapi.GetAuthCallbackResponseObject, error) {
 	const op = "GetAuthCallback"
-	// 驗證callback的參數和login時產生的參數是否相同
-	reqestState, requestNonce := "", ""
-	if request.Params.RequestState != nil {
-		reqestState = *request.Params.RequestState
+	// 取得session
+	session, err := session.GetSession(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("[%s] Fail to get session, err=%w", op, err)
 	}
-	if request.Params.RequestNonce != nil {
-		requestNonce = *request.Params.RequestNonce
-	}
-	verifier := impl.oidcProvider.NewExchangeVerifier(reqestState, requestNonce)
+	// 驗證callback的參數和login時儲存在 session 的參數是否相同
+	requestState, requestNonce := session.Get(SESSION_KEY_REQUEST_STATE), session.Get(SESSION_KEY_REQUEST_NONCE)
+	session.Delete(SESSION_KEY_REQUEST_STATE)
+	session.Delete(SESSION_KEY_REQUEST_NONCE)
+	verifier := impl.oidcProvider.NewExchangeVerifier(requestState, requestNonce)
 	// 向驗證伺服器交換token
-	token, err := impl.oidcProvider.Exchange(ctx, verifier, request.Params.Code, request.Params.State, request.Params.RedirectUrl)
+	redirectUrl := session.Get(SESSION_KEY_REDIRECT_URL)
+	session.Delete(SESSION_KEY_REDIRECT_URL)
+	token, err := impl.oidcProvider.Exchange(ctx, verifier, request.Params.Code, request.Params.State, redirectUrl)
 	if err != nil {
 		return nil, fmt.Errorf("[%s] Fail to exchange token, err=%w", op, err)
 	}
@@ -683,14 +686,19 @@ func (impl *ServerImpl) GetAuthCallback(ctx context.Context, request openapi.Get
 	if err != nil {
 		return nil, fmt.Errorf("[%s] Fail to sign JWT, err=%w", op, err)
 	}
-	// 設定cookie並導向
-	redirectUrl, err := url.Parse(request.Params.RedirectUrl)
-	if err != nil {
-		slog.Warn("[%s] Bad redirect url, err=%w", op, err)
+	// 取出登入前的url
+	urlBeforeLogin := session.Get(SESSION_KEY_URL_BEFORE_LOGIN)
+	session.Delete(SESSION_KEY_URL_BEFORE_LOGIN)
+	if err := session.Save(); err != nil {
+		return nil, fmt.Errorf("[%s] Fail to save session, err=%w", op, err)
 	}
-	return openapi.GetAuthCallback200Response{
+	return openapi.GetAuthCallback200JSONResponse{
+		Body: struct {
+			UrlBeforeLogin string `json:"urlBeforeLogin"`
+		}{
+			UrlBeforeLogin: urlBeforeLogin,
+		},
 		Headers: openapi.GetAuthCallback200ResponseHeaders{
-			Location: redirectUrl.Query().Get("redirect_url"),
 			SetCookieAccessTokenHttpOnlySecureMaxAge10800: q4TokenString,
 			SetCookieUsernameMaxAge10800:                  idTokenClaims.Nickname,
 		},
@@ -709,11 +717,22 @@ func (impl *ServerImpl) GetAuthLogin(ctx context.Context, request openapi.GetAut
 	if err != nil {
 		return nil, fmt.Errorf("[%s] Unable to generate nonce, err=%w", op, err)
 	}
+	// 使用 session 來儲存 state 、 nonce 、 redirectUrl 和 urlBeforeLogin
+	session, err := session.GetSession(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("[%s] Fail to get session, err=%w", op, err)
+	}
+	session.Set(SESSION_KEY_REQUEST_STATE, state)
+	session.Set(SESSION_KEY_REQUEST_NONCE, nonce)
+	session.Set(SESSION_KEY_REDIRECT_URL, request.Params.RedirectUrl)
+	session.Set(SESSION_KEY_URL_BEFORE_LOGIN, request.Params.UrlBeforeLogin)
+	if err := session.Save(); err != nil {
+		return nil, fmt.Errorf("[%s] Fail to save session, err=%w", op, err)
+	}
+	// 返回 sso server 的登入頁面
 	return openapi.GetAuthLogin200Response{
 		Headers: openapi.GetAuthLogin200ResponseHeaders{
 			Location: impl.oidcProvider.AuthURL(state, nonce, request.Params.RedirectUrl, []string{"email", "openid", "profile"}),
-			SetCookieRequestStateHttpOnlySecureMaxAge120: state,
-			SetCookieRequestNonceHttpOnlySecureMaxAge120: nonce,
 		},
 	}, nil
 }
