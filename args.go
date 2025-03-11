@@ -63,6 +63,10 @@ func ParseArgs() (*Args, error) {
 	// redis stream keys
 	pflag.String("redis-stream-key-for-bid", "q4-shared-bid-stream", "")
 
+	// session config
+	pflag.String("session-key-for-cookie", "session", "")
+	pflag.Duration("session-cookie-max-age", 24*time.Hour, "")
+
 	// bind pflag to viper
 	pflag.Parse()
 	viper.BindPFlags(pflag.CommandLine)
@@ -121,6 +125,10 @@ func ParseArgs() (*Args, error) {
 				StreamKeys: api.RedisStreamKeys{
 					BidStream: viper.GetString("redis-stream-key-for-bid"),
 				},
+			},
+			Session: api.SessionConfig{
+				KeyForCookie: viper.GetString("session-key-for-cookie"),
+				CookieMaxAge: viper.GetDuration("session-cookie-max-age"),
 			},
 		},
 	}, nil

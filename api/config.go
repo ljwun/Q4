@@ -9,11 +9,12 @@ type ServerConfig struct {
 	// 用於識別不同的服務實例
 	ID string
 
-	Auth  AuthConfig
-	OIDC  OIDCConfig
-	S3    S3Config
-	DB    DBConfig
-	Redis RedisConfig
+	Auth    AuthConfig
+	OIDC    OIDCConfig
+	S3      S3Config
+	DB      DBConfig
+	Redis   RedisConfig
+	Session SessionConfig
 }
 
 type AuthConfig struct {
@@ -62,4 +63,9 @@ type RedisConfig struct {
 
 type RedisStreamKeys struct {
 	BidStream string
+}
+
+type SessionConfig struct {
+	KeyForCookie string
+	CookieMaxAge time.Duration
 }
