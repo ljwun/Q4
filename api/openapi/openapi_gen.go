@@ -141,21 +141,15 @@ type GetAuthCallbackParams struct {
 
 	// State Authorization state.
 	State string `form:"state" json:"state"`
-
-	// RedirectUrl Url to back after finishing authorization.
-	RedirectUrl string `form:"redirect_url" json:"redirect_url"`
-
-	// RequestState Stored authentication state.
-	RequestState *string `form:"requestState,omitempty" json:"requestState,omitempty"`
-
-	// RequestNonce Stored authentication nonce.
-	RequestNonce *string `form:"requestNonce,omitempty" json:"requestNonce,omitempty"`
 }
 
 // GetAuthLoginParams defines parameters for GetAuthLogin.
 type GetAuthLoginParams struct {
 	// RedirectUrl Url to back after finishing authorization.
-	RedirectUrl string `form:"redirect_url" json:"redirect_url"`
+	RedirectUrl string `form:"redirectUrl" json:"redirectUrl"`
+
+	// UrlBeforeLogin Url visited before login.
+	UrlBeforeLogin string `form:"urlBeforeLogin" json:"urlBeforeLogin"`
 }
 
 // GetAuthLogoutParams defines parameters for GetAuthLogout.
@@ -472,51 +466,6 @@ func (siw *ServerInterfaceWrapper) GetAuthCallback(c *gin.Context) {
 		return
 	}
 
-	// ------------- Required query parameter "redirect_url" -------------
-
-	if paramValue := c.Query("redirect_url"); paramValue != "" {
-
-	} else {
-		siw.ErrorHandler(c, fmt.Errorf("Query argument redirect_url is required, but not found"), http.StatusBadRequest)
-		return
-	}
-
-	err = runtime.BindQueryParameter("form", true, true, "redirect_url", c.Request.URL.Query(), &params.RedirectUrl)
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter redirect_url: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	{
-		var cookie string
-
-		if cookie, err = c.Cookie("requestState"); err == nil {
-			var value string
-			err = runtime.BindStyledParameterWithOptions("simple", "requestState", cookie, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
-			if err != nil {
-				siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter requestState: %w", err), http.StatusBadRequest)
-				return
-			}
-			params.RequestState = &value
-
-		}
-	}
-
-	{
-		var cookie string
-
-		if cookie, err = c.Cookie("requestNonce"); err == nil {
-			var value string
-			err = runtime.BindStyledParameterWithOptions("simple", "requestNonce", cookie, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
-			if err != nil {
-				siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter requestNonce: %w", err), http.StatusBadRequest)
-				return
-			}
-			params.RequestNonce = &value
-
-		}
-	}
-
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -535,18 +484,33 @@ func (siw *ServerInterfaceWrapper) GetAuthLogin(c *gin.Context) {
 	// Parameter object where we will unmarshal all parameters from the context
 	var params GetAuthLoginParams
 
-	// ------------- Required query parameter "redirect_url" -------------
+	// ------------- Required query parameter "redirectUrl" -------------
 
-	if paramValue := c.Query("redirect_url"); paramValue != "" {
+	if paramValue := c.Query("redirectUrl"); paramValue != "" {
 
 	} else {
-		siw.ErrorHandler(c, fmt.Errorf("Query argument redirect_url is required, but not found"), http.StatusBadRequest)
+		siw.ErrorHandler(c, fmt.Errorf("Query argument redirectUrl is required, but not found"), http.StatusBadRequest)
 		return
 	}
 
-	err = runtime.BindQueryParameter("form", true, true, "redirect_url", c.Request.URL.Query(), &params.RedirectUrl)
+	err = runtime.BindQueryParameter("form", true, true, "redirectUrl", c.Request.URL.Query(), &params.RedirectUrl)
 	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter redirect_url: %w", err), http.StatusBadRequest)
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter redirectUrl: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required query parameter "urlBeforeLogin" -------------
+
+	if paramValue := c.Query("urlBeforeLogin"); paramValue != "" {
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Query argument urlBeforeLogin is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	err = runtime.BindQueryParameter("form", true, true, "urlBeforeLogin", c.Request.URL.Query(), &params.UrlBeforeLogin)
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter urlBeforeLogin: %w", err), http.StatusBadRequest)
 		return
 	}
 
@@ -919,19 +883,20 @@ type GetAuthCallbackResponseObject interface {
 }
 
 type GetAuthCallback200ResponseHeaders struct {
-	Location                                      string
 	SetCookieAccessTokenHttpOnlySecureMaxAge10800 string
 	SetCookieUsernameMaxAge10800                  string
-	UnsetCookieRequestNonceHttpOnlySecure         string
-	UnsetCookieRequestStateHttpOnlySecure         string
 }
 
-type GetAuthCallback200Response struct {
+type GetAuthCallback200JSONResponse struct {
+	Body struct {
+		// UrlBeforeLogin Url visited before login.
+		UrlBeforeLogin string `json:"urlBeforeLogin"`
+	}
 	Headers GetAuthCallback200ResponseHeaders
 }
 
-func (response GetAuthCallback200Response) VisitGetAuthCallbackResponse(w http.ResponseWriter) error {
-	w.Header().Set("Location", response.Headers.Location)
+func (response GetAuthCallback200JSONResponse) VisitGetAuthCallbackResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     "accessToken",
@@ -952,28 +917,9 @@ func (response GetAuthCallback200Response) VisitGetAuthCallbackResponse(w http.R
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   10800,
 	})
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     "requestNonce",
-		Value:    "", // 清空 cookie
-		Secure:   true,
-		HttpOnly: true,
-		Path:     "/",
-		SameSite: http.SameSiteStrictMode,
-		Expires:  time.Unix(0, 0),
-	})
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     "requestState",
-		Value:    "", // 清空 cookie
-		Secure:   true,
-		HttpOnly: true,
-		Path:     "/",
-		SameSite: http.SameSiteStrictMode,
-		Expires:  time.Unix(0, 0),
-	})
 	w.WriteHeader(200)
-	return nil
+
+	return json.NewEncoder(w).Encode(response.Body)
 }
 
 type GetAuthLoginRequestObject struct {
@@ -985,9 +931,7 @@ type GetAuthLoginResponseObject interface {
 }
 
 type GetAuthLogin200ResponseHeaders struct {
-	Location                                     string
-	SetCookieRequestNonceHttpOnlySecureMaxAge120 string
-	SetCookieRequestStateHttpOnlySecureMaxAge120 string
+	Location string
 }
 
 type GetAuthLogin200Response struct {
@@ -997,25 +941,6 @@ type GetAuthLogin200Response struct {
 func (response GetAuthLogin200Response) VisitGetAuthLoginResponse(w http.ResponseWriter) error {
 	w.Header().Set("Location", response.Headers.Location)
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     "requestNonce",
-		Value:    response.Headers.SetCookieRequestNonceHttpOnlySecureMaxAge120,
-		Secure:   true,
-		HttpOnly: true,
-		Path:     "/",
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   120,
-	})
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     "requestState",
-		Value:    response.Headers.SetCookieRequestStateHttpOnlySecureMaxAge120,
-		Secure:   true,
-		HttpOnly: true,
-		Path:     "/",
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   120,
-	})
 	w.WriteHeader(200)
 	return nil
 }
@@ -1419,43 +1344,42 @@ func (sh *strictHandler) PostImage(ctx *gin.Context, params PostImageParams) {
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
-	"F9o4u1QF9IZ5vHv8XwAAAP//0poqQGYvAAA=",
+	"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",
+	"AAA=",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file
