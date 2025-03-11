@@ -421,9 +421,16 @@ paths:
         - Authentication
       description: Obtain authentication url and redirect.
       parameters:
-        - name: redirect_url
+        - name: redirectUrl
           in: query
           description: Url to back after finishing authorization.
+          required: true
+          schema:
+            type: string
+            format: uri
+        - name: urlBeforeLogin
+          in: query
+          description: Url visited before login.
           required: true
           schema:
             type: string
@@ -432,16 +439,6 @@ paths:
         '200':
           description: Token issued successfully.
           headers:
-            Set-Cookie|requestState|HttpOnly;Secure;Max-Age=120:
-              description: "Add authentication state into secure http only cookie."
-              schema:
-                type: string
-                example: "Set-Cookie state=xxx.xxx.xxx; HttpOnly; Secure; Max-Age=3600"
-            Set-Cookie|requestNonce|HttpOnly;Secure;Max-Age=120:
-              description: "Add authentication nonce into secure http only cookie."
-              schema:
-                type: string
-                example: "Set-Cookie nonce=xxx.xxx.xxx; HttpOnly; Secure; Max-Age=3600"
             Location:
               description: The location of the login page of authentication server.
               schema:
@@ -454,20 +451,6 @@ paths:
         - Authentication
       description: Exchange authorization code to finish authentication flow and redirect to origin page.
       parameters:
-        - name: requestState
-          in: cookie
-          description: Stored authentication state.
-          required: false
-          schema:
-            type: string
-            example: st_xxxxxxxxxx
-        - name: requestNonce
-          in: cookie
-          description: Stored authentication nonce.
-          required: false
-          schema:
-            type: string
-            example: n_xxxxxxxxxx
         - name: code
           in: query
           description: Authorization code.
@@ -480,32 +463,10 @@ paths:
           required: true
           schema:
             type: string
-        - name: redirect_url
-          in: query
-          description: Url to back after finishing authorization.
-          required: true
-          schema:
-            type: string
-            format: uri
       responses:
         '200':
           description: Authentication successfully.
           headers:
-            Location:
-              description: The location of the origin page before login.
-              schema:
-                type: string
-                format: uri
-            Unset-Cookie|requestState|HttpOnly;Secure:
-              description: "Remove authentication state from secure http only cookie."
-              schema:
-                type: string
-                example: "Set-Cookie state=; HttpOnly; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
-            Unset-Cookie|requestNonce|HttpOnly;Secure:
-              description: "Remove authentication nonce from secure http only cookie."
-              schema:
-                type: string
-                example: "Set-Cookie nonce=; HttpOnly; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
             Set-Cookie|accessToken|HttpOnly;Secure;Max-Age=10800:
               description: "Add access token into secure http only cookie."
               schema:
@@ -517,6 +478,17 @@ paths:
               schema:
                 type: string
                 example: "username=XXXX; Secure; Max-Age=3600"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  urlBeforeLogin:
+                    description: Url visited before login.
+                    type: string
+                    format: uri
+                required:
+                  - urlBeforeLogin
   /auth/logout:
     get:
       summary: Revoke authentication token
