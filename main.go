@@ -29,6 +29,7 @@ func main() {
 	defer strictServer.Close()
 
 	router := gin.Default()
+	router.Use(strictServer.SessionMiddleware())
 	handler := openapi.NewStrictHandler(strictServer, nil)
 	openapi.RegisterHandlers(router, handler)
 	if err := router.Run(args.ServerURL); err != nil {
