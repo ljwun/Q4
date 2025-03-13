@@ -24,6 +24,10 @@ type AuthConfig struct {
 }
 
 type OIDCConfig struct {
+	Providers map[string]OIDCProviderConfig
+}
+
+type OIDCProviderConfig struct {
 	IssuerURL    string
 	ClientID     string
 	ClientSecret string

@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/viper"
 
 	"q4/api"
+	"q4/api/openapi"
 )
 
 func ParseArgs() (*Args, error) {
@@ -32,9 +33,20 @@ func ParseArgs() (*Args, error) {
 	pflag.Duration("auth-expire-duration", 3*time.Hour, "")
 
 	// oidc config
-	pflag.String("oidc-issuer-url", "", "")
-	pflag.String("oidc-client-id", "", "")
-	pflag.String("oidc-client-secret", "", "")
+	oidcProviders := []openapi.SSOProvider{
+		openapi.Internal,
+		openapi.Google,
+		// todo: Github 沒有提供 OIDC ，需要透過 OAuth2 和 Github API 來實作
+		// openapi.Github,
+		// todo: Microsoft 有提供 OIDC ，但 coreos-oidc 對於 Microsoft 的實作有問題
+		// 參考: https://github.com/coreos/go-oidc/issues/344
+		// openapi.Microsoft,
+	}
+	for _, provider := range oidcProviders {
+		pflag.String(fmt.Sprintf("oidc-%s-issuer-url", provider), "", "")
+		pflag.String(fmt.Sprintf("oidc-%s-client-id", provider), "", "")
+		pflag.String(fmt.Sprintf("oidc-%s-client-secret", provider), "", "")
+	}
 
 	// s3 config
 	pflag.String("s3-endpoint", "", "")
@@ -71,12 +83,26 @@ func ParseArgs() (*Args, error) {
 	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 
 	// parse arguments
+	// auth private key
 	authPrivateKey, err := base64.StdEncoding.DecodeString(viper.GetString("auth-private-key"))
 	if err != nil {
 		return nil, fmt.Errorf("%s: failed to decode auth private key: %w", op, err)
 	}
 	if len(authPrivateKey) != ed25519.PrivateKeySize {
 		return nil, fmt.Errorf("%s: invalid auth private key size", op)
+	}
+	// oidc providers
+	providerConfigs := make(map[string]api.OIDCProviderConfig)
+	for _, provider := range oidcProviders {
+		providerConfig := api.OIDCProviderConfig{
+			IssuerURL:    viper.GetString(fmt.Sprintf("oidc-%s-issuer-url", provider)),
+			ClientID:     viper.GetString(fmt.Sprintf("oidc-%s-client-id", provider)),
+			ClientSecret: viper.GetString(fmt.Sprintf("oidc-%s-client-secret", provider)),
+		}
+		if providerConfig.IssuerURL == "" || providerConfig.ClientID == "" || providerConfig.ClientSecret == "" {
+			continue
+		}
+		providerConfigs[string(provider)] = providerConfig
 	}
 
 	// initial arguments
@@ -91,9 +117,7 @@ func ParseArgs() (*Args, error) {
 				ExpireDuration: viper.GetDuration("auth-expire-duration"),
 			},
 			OIDC: api.OIDCConfig{
-				IssuerURL:    viper.GetString("oidc-issuer-url"),
-				ClientID:     viper.GetString("oidc-client-id"),
-				ClientSecret: viper.GetString("oidc-client-secret"),
+				Providers: providerConfigs,
 			},
 			S3: api.S3Config{
 				Endpoint:         viper.GetString("s3-endpoint"),
@@ -132,5 +156,6 @@ type Args struct {
 }
 
 func (args Args) Validate() bool {
-	return args.ServerURL != "" && args.ServerConfig.OIDC.IssuerURL != "" && args.ServerConfig.OIDC.ClientID != "" && args.ServerConfig.OIDC.ClientSecret != ""
+	// todo: validate arguments
+	return true
 }
