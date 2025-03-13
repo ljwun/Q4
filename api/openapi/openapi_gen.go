@@ -28,6 +28,14 @@ const (
 	BearerAuthScopes = "bearerAuth.Scopes"
 )
 
+// Defines values for SSOProvider.
+const (
+	Github    SSOProvider = "github"
+	Google    SSOProvider = "google"
+	Internal  SSOProvider = "internal"
+	Microsoft SSOProvider = "microsoft"
+)
+
 // Defines values for GetAuctionItemsParamsSortKey.
 const (
 	CurrentBid GetAuctionItemsParamsSortKey = "currentBid"
@@ -55,6 +63,9 @@ type BidEvent struct {
 	Time time.Time `json:"time"`
 	User string    `json:"user"`
 }
+
+// SSOProvider defines model for SSOProvider.
+type SSOProvider string
 
 // PostAuctionItemJSONBody defines parameters for PostAuctionItem.
 type PostAuctionItemJSONBody struct {
@@ -134,30 +145,6 @@ type GetAuctionItemsParamsSortKey string
 // GetAuctionItemsParamsSortOrder defines parameters for GetAuctionItems.
 type GetAuctionItemsParamsSortOrder string
 
-// GetAuthCallbackParams defines parameters for GetAuthCallback.
-type GetAuthCallbackParams struct {
-	// Code Authorization code.
-	Code string `form:"code" json:"code"`
-
-	// State Authorization state.
-	State string `form:"state" json:"state"`
-
-	// RedirectUrl Url to back after finishing authorization.
-	RedirectUrl string `form:"redirect_url" json:"redirect_url"`
-
-	// RequestState Stored authentication state.
-	RequestState *string `form:"requestState,omitempty" json:"requestState,omitempty"`
-
-	// RequestNonce Stored authentication nonce.
-	RequestNonce *string `form:"requestNonce,omitempty" json:"requestNonce,omitempty"`
-}
-
-// GetAuthLoginParams defines parameters for GetAuthLogin.
-type GetAuthLoginParams struct {
-	// RedirectUrl Url to back after finishing authorization.
-	RedirectUrl string `form:"redirect_url" json:"redirect_url"`
-}
-
 // GetAuthLogoutParams defines parameters for GetAuthLogout.
 type GetAuthLogoutParams struct {
 	// AccessToken access token for current user.
@@ -165,6 +152,30 @@ type GetAuthLogoutParams struct {
 
 	// Username name for current user.
 	Username *string `form:"username,omitempty" json:"username,omitempty"`
+}
+
+// GetAuthSsoProviderCallbackParams defines parameters for GetAuthSsoProviderCallback.
+type GetAuthSsoProviderCallbackParams struct {
+	// Code Authorization code.
+	Code string `form:"code" json:"code"`
+
+	// State Authorization state.
+	State string `form:"state" json:"state"`
+
+	// RequestState Stored authentication state.
+	RequestState *string `form:"requestState,omitempty" json:"requestState,omitempty"`
+
+	// RequestNonce Stored authentication nonce.
+	RequestNonce *string `form:"requestNonce,omitempty" json:"requestNonce,omitempty"`
+
+	// RequestRedirectUrl Stored redirect url.
+	RequestRedirectUrl *string `form:"requestRedirectUrl,omitempty" json:"requestRedirectUrl,omitempty"`
+}
+
+// GetAuthSsoProviderLoginParams defines parameters for GetAuthSsoProviderLogin.
+type GetAuthSsoProviderLoginParams struct {
+	// RedirectUrl Url to back after finishing authorization.
+	RedirectUrl string `form:"redirectUrl" json:"redirectUrl"`
 }
 
 // PostImageParams defines parameters for PostImage.
@@ -196,15 +207,15 @@ type ServerInterface interface {
 	// List auction items
 	// (GET /auction/items)
 	GetAuctionItems(c *gin.Context, params GetAuctionItemsParams)
-	// Exchange authorization code
-	// (GET /auth/callback)
-	GetAuthCallback(c *gin.Context, params GetAuthCallbackParams)
-	// Obtain authentication url
-	// (GET /auth/login)
-	GetAuthLogin(c *gin.Context, params GetAuthLoginParams)
 	// Revoke authentication token
 	// (GET /auth/logout)
 	GetAuthLogout(c *gin.Context, params GetAuthLogoutParams)
+	// Exchange authorization code
+	// (GET /auth/sso/{provider}/callback)
+	GetAuthSsoProviderCallback(c *gin.Context, provider SSOProvider, params GetAuthSsoProviderCallbackParams)
+	// Obtain authentication url
+	// (GET /auth/sso/{provider}/login)
+	GetAuthSsoProviderLogin(c *gin.Context, provider SSOProvider, params GetAuthSsoProviderLoginParams)
 	// Upload an image
 	// (POST /image)
 	PostImage(c *gin.Context, params PostImageParams)
@@ -434,132 +445,6 @@ func (siw *ServerInterfaceWrapper) GetAuctionItems(c *gin.Context) {
 	siw.Handler.GetAuctionItems(c, params)
 }
 
-// GetAuthCallback operation middleware
-func (siw *ServerInterfaceWrapper) GetAuthCallback(c *gin.Context) {
-
-	var err error
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params GetAuthCallbackParams
-
-	// ------------- Required query parameter "code" -------------
-
-	if paramValue := c.Query("code"); paramValue != "" {
-
-	} else {
-		siw.ErrorHandler(c, fmt.Errorf("Query argument code is required, but not found"), http.StatusBadRequest)
-		return
-	}
-
-	err = runtime.BindQueryParameter("form", true, true, "code", c.Request.URL.Query(), &params.Code)
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter code: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	// ------------- Required query parameter "state" -------------
-
-	if paramValue := c.Query("state"); paramValue != "" {
-
-	} else {
-		siw.ErrorHandler(c, fmt.Errorf("Query argument state is required, but not found"), http.StatusBadRequest)
-		return
-	}
-
-	err = runtime.BindQueryParameter("form", true, true, "state", c.Request.URL.Query(), &params.State)
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter state: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	// ------------- Required query parameter "redirect_url" -------------
-
-	if paramValue := c.Query("redirect_url"); paramValue != "" {
-
-	} else {
-		siw.ErrorHandler(c, fmt.Errorf("Query argument redirect_url is required, but not found"), http.StatusBadRequest)
-		return
-	}
-
-	err = runtime.BindQueryParameter("form", true, true, "redirect_url", c.Request.URL.Query(), &params.RedirectUrl)
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter redirect_url: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	{
-		var cookie string
-
-		if cookie, err = c.Cookie("requestState"); err == nil {
-			var value string
-			err = runtime.BindStyledParameterWithOptions("simple", "requestState", cookie, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
-			if err != nil {
-				siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter requestState: %w", err), http.StatusBadRequest)
-				return
-			}
-			params.RequestState = &value
-
-		}
-	}
-
-	{
-		var cookie string
-
-		if cookie, err = c.Cookie("requestNonce"); err == nil {
-			var value string
-			err = runtime.BindStyledParameterWithOptions("simple", "requestNonce", cookie, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
-			if err != nil {
-				siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter requestNonce: %w", err), http.StatusBadRequest)
-				return
-			}
-			params.RequestNonce = &value
-
-		}
-	}
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetAuthCallback(c, params)
-}
-
-// GetAuthLogin operation middleware
-func (siw *ServerInterfaceWrapper) GetAuthLogin(c *gin.Context) {
-
-	var err error
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params GetAuthLoginParams
-
-	// ------------- Required query parameter "redirect_url" -------------
-
-	if paramValue := c.Query("redirect_url"); paramValue != "" {
-
-	} else {
-		siw.ErrorHandler(c, fmt.Errorf("Query argument redirect_url is required, but not found"), http.StatusBadRequest)
-		return
-	}
-
-	err = runtime.BindQueryParameter("form", true, true, "redirect_url", c.Request.URL.Query(), &params.RedirectUrl)
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter redirect_url: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetAuthLogin(c, params)
-}
-
 // GetAuthLogout operation middleware
 func (siw *ServerInterfaceWrapper) GetAuthLogout(c *gin.Context) {
 
@@ -606,6 +491,150 @@ func (siw *ServerInterfaceWrapper) GetAuthLogout(c *gin.Context) {
 	}
 
 	siw.Handler.GetAuthLogout(c, params)
+}
+
+// GetAuthSsoProviderCallback operation middleware
+func (siw *ServerInterfaceWrapper) GetAuthSsoProviderCallback(c *gin.Context) {
+
+	var err error
+
+	// ------------- Path parameter "provider" -------------
+	var provider SSOProvider
+
+	err = runtime.BindStyledParameterWithOptions("simple", "provider", c.Param("provider"), &provider, runtime.BindStyledParameterOptions{Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter provider: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAuthSsoProviderCallbackParams
+
+	// ------------- Required query parameter "code" -------------
+
+	if paramValue := c.Query("code"); paramValue != "" {
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Query argument code is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	err = runtime.BindQueryParameter("form", true, true, "code", c.Request.URL.Query(), &params.Code)
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter code: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required query parameter "state" -------------
+
+	if paramValue := c.Query("state"); paramValue != "" {
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Query argument state is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	err = runtime.BindQueryParameter("form", true, true, "state", c.Request.URL.Query(), &params.State)
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter state: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	{
+		var cookie string
+
+		if cookie, err = c.Cookie("requestState"); err == nil {
+			var value string
+			err = runtime.BindStyledParameterWithOptions("simple", "requestState", cookie, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+			if err != nil {
+				siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter requestState: %w", err), http.StatusBadRequest)
+				return
+			}
+			params.RequestState = &value
+
+		}
+	}
+
+	{
+		var cookie string
+
+		if cookie, err = c.Cookie("requestNonce"); err == nil {
+			var value string
+			err = runtime.BindStyledParameterWithOptions("simple", "requestNonce", cookie, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+			if err != nil {
+				siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter requestNonce: %w", err), http.StatusBadRequest)
+				return
+			}
+			params.RequestNonce = &value
+
+		}
+	}
+
+	{
+		var cookie string
+
+		if cookie, err = c.Cookie("requestRedirectUrl"); err == nil {
+			var value string
+			err = runtime.BindStyledParameterWithOptions("simple", "requestRedirectUrl", cookie, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+			if err != nil {
+				siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter requestRedirectUrl: %w", err), http.StatusBadRequest)
+				return
+			}
+			params.RequestRedirectUrl = &value
+
+		}
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAuthSsoProviderCallback(c, provider, params)
+}
+
+// GetAuthSsoProviderLogin operation middleware
+func (siw *ServerInterfaceWrapper) GetAuthSsoProviderLogin(c *gin.Context) {
+
+	var err error
+
+	// ------------- Path parameter "provider" -------------
+	var provider SSOProvider
+
+	err = runtime.BindStyledParameterWithOptions("simple", "provider", c.Param("provider"), &provider, runtime.BindStyledParameterOptions{Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter provider: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAuthSsoProviderLoginParams
+
+	// ------------- Required query parameter "redirectUrl" -------------
+
+	if paramValue := c.Query("redirectUrl"); paramValue != "" {
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Query argument redirectUrl is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	err = runtime.BindQueryParameter("form", true, true, "redirectUrl", c.Request.URL.Query(), &params.RedirectUrl)
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter redirectUrl: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetAuthSsoProviderLogin(c, provider, params)
 }
 
 // PostImage operation middleware
@@ -673,9 +702,9 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/auction/item/:itemID/bids", wrapper.PostAuctionItemItemIDBids)
 	router.GET(options.BaseURL+"/auction/item/:itemID/events", wrapper.GetAuctionItemItemIDEvents)
 	router.GET(options.BaseURL+"/auction/items", wrapper.GetAuctionItems)
-	router.GET(options.BaseURL+"/auth/callback", wrapper.GetAuthCallback)
-	router.GET(options.BaseURL+"/auth/login", wrapper.GetAuthLogin)
 	router.GET(options.BaseURL+"/auth/logout", wrapper.GetAuthLogout)
+	router.GET(options.BaseURL+"/auth/sso/:provider/callback", wrapper.GetAuthSsoProviderCallback)
+	router.GET(options.BaseURL+"/auth/sso/:provider/login", wrapper.GetAuthSsoProviderLogin)
 	router.POST(options.BaseURL+"/image", wrapper.PostImage)
 }
 
@@ -910,116 +939,6 @@ func (response GetAuctionItems404Response) VisitGetAuctionItemsResponse(w http.R
 	return nil
 }
 
-type GetAuthCallbackRequestObject struct {
-	Params GetAuthCallbackParams
-}
-
-type GetAuthCallbackResponseObject interface {
-	VisitGetAuthCallbackResponse(w http.ResponseWriter) error
-}
-
-type GetAuthCallback200ResponseHeaders struct {
-	Location                                      string
-	SetCookieAccessTokenHttpOnlySecureMaxAge10800 string
-	SetCookieUsernameMaxAge10800                  string
-	UnsetCookieRequestNonceHttpOnlySecure         string
-	UnsetCookieRequestStateHttpOnlySecure         string
-}
-
-type GetAuthCallback200Response struct {
-	Headers GetAuthCallback200ResponseHeaders
-}
-
-func (response GetAuthCallback200Response) VisitGetAuthCallbackResponse(w http.ResponseWriter) error {
-	w.Header().Set("Location", response.Headers.Location)
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     "accessToken",
-		Value:    response.Headers.SetCookieAccessTokenHttpOnlySecureMaxAge10800,
-		Secure:   true,
-		HttpOnly: true,
-		Path:     "/",
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   10800,
-	})
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     "username",
-		Value:    response.Headers.SetCookieUsernameMaxAge10800,
-		Secure:   false,
-		HttpOnly: false,
-		Path:     "/",
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   10800,
-	})
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     "requestNonce",
-		Value:    "", // 清空 cookie
-		Secure:   true,
-		HttpOnly: true,
-		Path:     "/",
-		SameSite: http.SameSiteStrictMode,
-		Expires:  time.Unix(0, 0),
-	})
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     "requestState",
-		Value:    "", // 清空 cookie
-		Secure:   true,
-		HttpOnly: true,
-		Path:     "/",
-		SameSite: http.SameSiteStrictMode,
-		Expires:  time.Unix(0, 0),
-	})
-	w.WriteHeader(200)
-	return nil
-}
-
-type GetAuthLoginRequestObject struct {
-	Params GetAuthLoginParams
-}
-
-type GetAuthLoginResponseObject interface {
-	VisitGetAuthLoginResponse(w http.ResponseWriter) error
-}
-
-type GetAuthLogin200ResponseHeaders struct {
-	Location                                     string
-	SetCookieRequestNonceHttpOnlySecureMaxAge120 string
-	SetCookieRequestStateHttpOnlySecureMaxAge120 string
-}
-
-type GetAuthLogin200Response struct {
-	Headers GetAuthLogin200ResponseHeaders
-}
-
-func (response GetAuthLogin200Response) VisitGetAuthLoginResponse(w http.ResponseWriter) error {
-	w.Header().Set("Location", response.Headers.Location)
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     "requestNonce",
-		Value:    response.Headers.SetCookieRequestNonceHttpOnlySecureMaxAge120,
-		Secure:   true,
-		HttpOnly: true,
-		Path:     "/",
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   120,
-	})
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     "requestState",
-		Value:    response.Headers.SetCookieRequestStateHttpOnlySecureMaxAge120,
-		Secure:   true,
-		HttpOnly: true,
-		Path:     "/",
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   120,
-	})
-	w.WriteHeader(200)
-	return nil
-}
-
 type GetAuthLogoutRequestObject struct {
 	Params GetAuthLogoutParams
 }
@@ -1059,6 +978,154 @@ func (response GetAuthLogout200Response) VisitGetAuthLogoutResponse(w http.Respo
 		Expires:  time.Unix(0, 0),
 	})
 	w.WriteHeader(200)
+	return nil
+}
+
+type GetAuthSsoProviderCallbackRequestObject struct {
+	Provider SSOProvider `json:"provider"`
+	Params   GetAuthSsoProviderCallbackParams
+}
+
+type GetAuthSsoProviderCallbackResponseObject interface {
+	VisitGetAuthSsoProviderCallbackResponse(w http.ResponseWriter) error
+}
+
+type GetAuthSsoProviderCallback200ResponseHeaders struct {
+	SetCookieAccessTokenHttpOnlySecureMaxAge10800 string
+	SetCookieUsernameMaxAge10800                  string
+	UnsetCookieRequestNonceHttpOnlySecure         string
+	UnsetCookieRequestRedirectUrlHttpOnlySecure   string
+	UnsetCookieRequestStateHttpOnlySecure         string
+}
+
+type GetAuthSsoProviderCallback200Response struct {
+	Headers GetAuthSsoProviderCallback200ResponseHeaders
+}
+
+func (response GetAuthSsoProviderCallback200Response) VisitGetAuthSsoProviderCallbackResponse(w http.ResponseWriter) error {
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "accessToken",
+		Value:    response.Headers.SetCookieAccessTokenHttpOnlySecureMaxAge10800,
+		Secure:   true,
+		HttpOnly: true,
+		Path:     "/",
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   10800,
+	})
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "username",
+		Value:    response.Headers.SetCookieUsernameMaxAge10800,
+		Secure:   false,
+		HttpOnly: false,
+		Path:     "/",
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   10800,
+	})
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "requestNonce",
+		Value:    "", // 清空 cookie
+		Secure:   true,
+		HttpOnly: true,
+		Path:     "/",
+		SameSite: http.SameSiteStrictMode,
+		Expires:  time.Unix(0, 0),
+	})
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "requestRedirectUrl",
+		Value:    "", // 清空 cookie
+		Secure:   true,
+		HttpOnly: true,
+		Path:     "/",
+		SameSite: http.SameSiteStrictMode,
+		Expires:  time.Unix(0, 0),
+	})
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "requestState",
+		Value:    "", // 清空 cookie
+		Secure:   true,
+		HttpOnly: true,
+		Path:     "/",
+		SameSite: http.SameSiteStrictMode,
+		Expires:  time.Unix(0, 0),
+	})
+	w.WriteHeader(200)
+	return nil
+}
+
+type GetAuthSsoProviderCallback404Response struct {
+}
+
+func (response GetAuthSsoProviderCallback404Response) VisitGetAuthSsoProviderCallbackResponse(w http.ResponseWriter) error {
+	w.WriteHeader(404)
+	return nil
+}
+
+type GetAuthSsoProviderLoginRequestObject struct {
+	Provider SSOProvider `json:"provider"`
+	Params   GetAuthSsoProviderLoginParams
+}
+
+type GetAuthSsoProviderLoginResponseObject interface {
+	VisitGetAuthSsoProviderLoginResponse(w http.ResponseWriter) error
+}
+
+type GetAuthSsoProviderLogin200ResponseHeaders struct {
+	Location                                           string
+	SetCookieRequestNonceHttpOnlySecureMaxAge120       string
+	SetCookieRequestRedirectUrlHttpOnlySecureMaxAge120 string
+	SetCookieRequestStateHttpOnlySecureMaxAge120       string
+}
+
+type GetAuthSsoProviderLogin200Response struct {
+	Headers GetAuthSsoProviderLogin200ResponseHeaders
+}
+
+func (response GetAuthSsoProviderLogin200Response) VisitGetAuthSsoProviderLoginResponse(w http.ResponseWriter) error {
+	w.Header().Set("Location", response.Headers.Location)
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "requestNonce",
+		Value:    response.Headers.SetCookieRequestNonceHttpOnlySecureMaxAge120,
+		Secure:   true,
+		HttpOnly: true,
+		Path:     "/",
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   120,
+	})
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "requestRedirectUrl",
+		Value:    response.Headers.SetCookieRequestRedirectUrlHttpOnlySecureMaxAge120,
+		Secure:   true,
+		HttpOnly: true,
+		Path:     "/",
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   120,
+	})
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "requestState",
+		Value:    response.Headers.SetCookieRequestStateHttpOnlySecureMaxAge120,
+		Secure:   true,
+		HttpOnly: true,
+		Path:     "/",
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   120,
+	})
+	w.WriteHeader(200)
+	return nil
+}
+
+type GetAuthSsoProviderLogin404Response struct {
+}
+
+func (response GetAuthSsoProviderLogin404Response) VisitGetAuthSsoProviderLoginResponse(w http.ResponseWriter) error {
+	w.WriteHeader(404)
 	return nil
 }
 
@@ -1128,15 +1195,15 @@ type StrictServerInterface interface {
 	// List auction items
 	// (GET /auction/items)
 	GetAuctionItems(ctx context.Context, request GetAuctionItemsRequestObject) (GetAuctionItemsResponseObject, error)
-	// Exchange authorization code
-	// (GET /auth/callback)
-	GetAuthCallback(ctx context.Context, request GetAuthCallbackRequestObject) (GetAuthCallbackResponseObject, error)
-	// Obtain authentication url
-	// (GET /auth/login)
-	GetAuthLogin(ctx context.Context, request GetAuthLoginRequestObject) (GetAuthLoginResponseObject, error)
 	// Revoke authentication token
 	// (GET /auth/logout)
 	GetAuthLogout(ctx context.Context, request GetAuthLogoutRequestObject) (GetAuthLogoutResponseObject, error)
+	// Exchange authorization code
+	// (GET /auth/sso/{provider}/callback)
+	GetAuthSsoProviderCallback(ctx context.Context, request GetAuthSsoProviderCallbackRequestObject) (GetAuthSsoProviderCallbackResponseObject, error)
+	// Obtain authentication url
+	// (GET /auth/sso/{provider}/login)
+	GetAuthSsoProviderLogin(ctx context.Context, request GetAuthSsoProviderLoginRequestObject) (GetAuthSsoProviderLoginResponseObject, error)
 	// Upload an image
 	// (POST /image)
 	PostImage(ctx context.Context, request PostImageRequestObject) (PostImageResponseObject, error)
@@ -1306,60 +1373,6 @@ func (sh *strictHandler) GetAuctionItems(ctx *gin.Context, params GetAuctionItem
 	}
 }
 
-// GetAuthCallback operation middleware
-func (sh *strictHandler) GetAuthCallback(ctx *gin.Context, params GetAuthCallbackParams) {
-	var request GetAuthCallbackRequestObject
-
-	request.Params = params
-
-	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
-		return sh.ssi.GetAuthCallback(ctx, request.(GetAuthCallbackRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GetAuthCallback")
-	}
-
-	response, err := handler(ctx, request)
-
-	if err != nil {
-		ctx.Error(err)
-		ctx.Status(http.StatusInternalServerError)
-	} else if validResponse, ok := response.(GetAuthCallbackResponseObject); ok {
-		if err := validResponse.VisitGetAuthCallbackResponse(ctx.Writer); err != nil {
-			ctx.Error(err)
-		}
-	} else if response != nil {
-		ctx.Error(fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// GetAuthLogin operation middleware
-func (sh *strictHandler) GetAuthLogin(ctx *gin.Context, params GetAuthLoginParams) {
-	var request GetAuthLoginRequestObject
-
-	request.Params = params
-
-	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
-		return sh.ssi.GetAuthLogin(ctx, request.(GetAuthLoginRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GetAuthLogin")
-	}
-
-	response, err := handler(ctx, request)
-
-	if err != nil {
-		ctx.Error(err)
-		ctx.Status(http.StatusInternalServerError)
-	} else if validResponse, ok := response.(GetAuthLoginResponseObject); ok {
-		if err := validResponse.VisitGetAuthLoginResponse(ctx.Writer); err != nil {
-			ctx.Error(err)
-		}
-	} else if response != nil {
-		ctx.Error(fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
 // GetAuthLogout operation middleware
 func (sh *strictHandler) GetAuthLogout(ctx *gin.Context, params GetAuthLogoutParams) {
 	var request GetAuthLogoutRequestObject
@@ -1380,6 +1393,62 @@ func (sh *strictHandler) GetAuthLogout(ctx *gin.Context, params GetAuthLogoutPar
 		ctx.Status(http.StatusInternalServerError)
 	} else if validResponse, ok := response.(GetAuthLogoutResponseObject); ok {
 		if err := validResponse.VisitGetAuthLogoutResponse(ctx.Writer); err != nil {
+			ctx.Error(err)
+		}
+	} else if response != nil {
+		ctx.Error(fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAuthSsoProviderCallback operation middleware
+func (sh *strictHandler) GetAuthSsoProviderCallback(ctx *gin.Context, provider SSOProvider, params GetAuthSsoProviderCallbackParams) {
+	var request GetAuthSsoProviderCallbackRequestObject
+
+	request.Provider = provider
+	request.Params = params
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAuthSsoProviderCallback(ctx, request.(GetAuthSsoProviderCallbackRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAuthSsoProviderCallback")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		ctx.Error(err)
+		ctx.Status(http.StatusInternalServerError)
+	} else if validResponse, ok := response.(GetAuthSsoProviderCallbackResponseObject); ok {
+		if err := validResponse.VisitGetAuthSsoProviderCallbackResponse(ctx.Writer); err != nil {
+			ctx.Error(err)
+		}
+	} else if response != nil {
+		ctx.Error(fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAuthSsoProviderLogin operation middleware
+func (sh *strictHandler) GetAuthSsoProviderLogin(ctx *gin.Context, provider SSOProvider, params GetAuthSsoProviderLoginParams) {
+	var request GetAuthSsoProviderLoginRequestObject
+
+	request.Provider = provider
+	request.Params = params
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAuthSsoProviderLogin(ctx, request.(GetAuthSsoProviderLoginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAuthSsoProviderLogin")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		ctx.Error(err)
+		ctx.Status(http.StatusInternalServerError)
+	} else if validResponse, ok := response.(GetAuthSsoProviderLoginResponseObject); ok {
+		if err := validResponse.VisitGetAuthSsoProviderLoginResponse(ctx.Writer); err != nil {
 			ctx.Error(err)
 		}
 	} else if response != nil {
@@ -1419,43 +1488,45 @@ func (sh *strictHandler) PostImage(ctx *gin.Context, params PostImageParams) {
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
-	"F9o4u1QF9IZ5vHv8XwAAAP//0poqQGYvAAA=",
+	"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",
+	"5QtprF6qDDrF7O53/w8AAP//F2YKq8syAAA=",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file
