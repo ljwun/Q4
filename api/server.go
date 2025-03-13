@@ -10,7 +10,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"sync"
 	"time"
 
@@ -38,7 +37,7 @@ import (
 )
 
 type ServerImpl struct {
-	oidcProvider  *oidc.ExtendedProvider
+	oidcProviders map[openapi.SSOProvider]*oidc.ExtendedProvider
 	sseManager    sse.IConnectionManager[openapi.BidEvent]
 	s3Operator    *internalS3.S3Operator
 	htmlChecker   *bluemonday.Policy
@@ -56,9 +55,13 @@ func NewServer(config ServerConfig) (*ServerImpl, error) {
 	const op = "NewServer"
 
 	// 初始化OIDC提供者
-	oidcProvider, err := oidc.NewExtendedProvider(config.OIDC.IssuerURL, config.OIDC.ClientID, config.OIDC.ClientSecret)
-	if err != nil {
-		return nil, fmt.Errorf("[%s] Fail to initial OIDC provider, err=%w", op, err)
+	oidcProviders := make(map[openapi.SSOProvider]*oidc.ExtendedProvider, len(config.OIDC.Providers))
+	for provider, providerConfig := range config.OIDC.Providers {
+		oidcProvider, err := oidc.NewExtendedProvider(providerConfig.IssuerURL, providerConfig.ClientID, providerConfig.ClientSecret)
+		if err != nil {
+			return nil, fmt.Errorf("[%s] Fail to initial OIDC provider, provider=%s, err=%w", op, provider, err)
+		}
+		oidcProviders[openapi.SSOProvider(provider)] = oidcProvider
 	}
 
 	// 初始化S3客戶端
@@ -136,7 +139,7 @@ func NewServer(config ServerConfig) (*ServerImpl, error) {
 	}
 
 	return &ServerImpl{
-		oidcProvider:  oidcProvider,
+		oidcProviders: oidcProviders,
 		sseManager:    sseManager,
 		s3Operator:    s3Operator,
 		htmlChecker:   bluemonday.UGCPolicy(),
@@ -638,20 +641,29 @@ func (impl *ServerImpl) GetAuctionItems(ctx context.Context, request openapi.Get
 }
 
 // Exchange authorization code
-// (GET /auth/callback)
-func (impl *ServerImpl) GetAuthCallback(ctx context.Context, request openapi.GetAuthCallbackRequestObject) (openapi.GetAuthCallbackResponseObject, error) {
+// (GET /auth/sso/{provider}/callback)
+func (impl *ServerImpl) GetAuthSsoProviderCallback(ctx context.Context, request openapi.GetAuthSsoProviderCallbackRequestObject) (openapi.GetAuthSsoProviderCallbackResponseObject, error) {
 	const op = "GetAuthCallback"
-	// 驗證callback的參數和login時產生的參數是否相同
-	reqestState, requestNonce := "", ""
+	// 取得provider
+	provider, ok := impl.oidcProviders[request.Provider]
+	if !ok {
+		return openapi.GetAuthSsoProviderCallback404Response{}, nil
+	}
+	// 驗證 callback 的參數和login時儲存在 secure cookie 的參數是否相同
+	var requestState, requestNonce string
 	if request.Params.RequestState != nil {
-		reqestState = *request.Params.RequestState
+		requestState = *request.Params.RequestState
 	}
 	if request.Params.RequestNonce != nil {
 		requestNonce = *request.Params.RequestNonce
 	}
-	verifier := impl.oidcProvider.NewExchangeVerifier(reqestState, requestNonce)
+	verifier := provider.NewExchangeVerifier(requestState, requestNonce)
 	// 向驗證伺服器交換token
-	token, err := impl.oidcProvider.Exchange(ctx, verifier, request.Params.Code, request.Params.State, request.Params.RedirectUrl)
+	var requestRedirectUrl string
+	if request.Params.RequestRedirectUrl != nil {
+		requestRedirectUrl = *request.Params.RequestRedirectUrl
+	}
+	token, err := provider.Exchange(ctx, verifier, request.Params.Code, request.Params.State, requestRedirectUrl)
 	if err != nil {
 		return nil, fmt.Errorf("[%s] Fail to exchange token, err=%w", op, err)
 	}
@@ -683,14 +695,8 @@ func (impl *ServerImpl) GetAuthCallback(ctx context.Context, request openapi.Get
 	if err != nil {
 		return nil, fmt.Errorf("[%s] Fail to sign JWT, err=%w", op, err)
 	}
-	// 設定cookie並導向
-	redirectUrl, err := url.Parse(request.Params.RedirectUrl)
-	if err != nil {
-		slog.Warn("[%s] Bad redirect url, err=%w", op, err)
-	}
-	return openapi.GetAuthCallback200Response{
-		Headers: openapi.GetAuthCallback200ResponseHeaders{
-			Location: redirectUrl.Query().Get("redirect_url"),
+	return openapi.GetAuthSsoProviderCallback200Response{
+		Headers: openapi.GetAuthSsoProviderCallback200ResponseHeaders{
 			SetCookieAccessTokenHttpOnlySecureMaxAge10800: q4TokenString,
 			SetCookieUsernameMaxAge10800:                  idTokenClaims.Nickname,
 		},
@@ -698,9 +704,14 @@ func (impl *ServerImpl) GetAuthCallback(ctx context.Context, request openapi.Get
 }
 
 // Obtain authentication url
-// (GET /auth/login)
-func (impl *ServerImpl) GetAuthLogin(ctx context.Context, request openapi.GetAuthLoginRequestObject) (openapi.GetAuthLoginResponseObject, error) {
+// (GET /auth/sso/{provider}/login)
+func (impl *ServerImpl) GetAuthSsoProviderLogin(ctx context.Context, request openapi.GetAuthSsoProviderLoginRequestObject) (openapi.GetAuthSsoProviderLoginResponseObject, error) {
 	const op = "GetAuthLogin"
+	// 取得provider
+	provider, ok := impl.oidcProviders[request.Provider]
+	if !ok {
+		return openapi.GetAuthSsoProviderLogin404Response{}, nil
+	}
 	state, err := generateID("st")
 	if err != nil {
 		return nil, fmt.Errorf("[%s] Unable to generate state, err=%w", op, err)
@@ -709,11 +720,13 @@ func (impl *ServerImpl) GetAuthLogin(ctx context.Context, request openapi.GetAut
 	if err != nil {
 		return nil, fmt.Errorf("[%s] Unable to generate nonce, err=%w", op, err)
 	}
-	return openapi.GetAuthLogin200Response{
-		Headers: openapi.GetAuthLogin200ResponseHeaders{
-			Location: impl.oidcProvider.AuthURL(state, nonce, request.Params.RedirectUrl, []string{"email", "openid", "profile"}),
-			SetCookieRequestStateHttpOnlySecureMaxAge120: state,
-			SetCookieRequestNonceHttpOnlySecureMaxAge120: nonce,
+	// 返回 sso server 的登入頁面
+	return openapi.GetAuthSsoProviderLogin200Response{
+		Headers: openapi.GetAuthSsoProviderLogin200ResponseHeaders{
+			Location: provider.AuthURL(state, nonce, request.Params.RedirectUrl, []string{"email", "openid", "profile"}),
+			SetCookieRequestStateHttpOnlySecureMaxAge120:       state,
+			SetCookieRequestNonceHttpOnlySecureMaxAge120:       nonce,
+			SetCookieRequestRedirectUrlHttpOnlySecureMaxAge120: request.Params.RedirectUrl,
 		},
 	}, nil
 }
