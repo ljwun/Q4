@@ -3,7 +3,6 @@ import { Button } from "@/components/ui/button"
 import {
     DropdownMenu,
     DropdownMenuContent,
-    DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Menu } from 'lucide-react'
@@ -30,28 +29,27 @@ export function Navbar() {
                                 <NavLink />
                             </div>
                         </div>
-                        {/* User */}
-                        <div className="hidden md:block">
+                        <div className="flex items-center space-x-2">
                             <ThemeTrigger />
-                            <NavUser />
-                        </div>
-                        {/* Mobile */}
-                        <div className="md:hidden">
-                            <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                    <Button variant="outline" size="icon">
-                                        <Menu className="h-5 w-5" />
-                                        <span className="sr-only">打開選單</span>
-                                    </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                    <NavDropdownMenuLink />
-                                    <DropdownMenuItem asChild>
-                                        <ThemeTrigger />
-                                    </DropdownMenuItem>
-                                    <NavDropdownMenuUser />
-                                </DropdownMenuContent>
-                            </DropdownMenu>
+                            {/* User */}
+                            <div className="hidden md:block">
+                                <NavUser />
+                            </div>
+                            {/* Mobile */}
+                            <div className="md:hidden">
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <Button variant="outline" size="icon">
+                                            <Menu className="h-5 w-5" />
+                                            <span className="sr-only">打開選單</span>
+                                        </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                        <NavDropdownMenuLink />
+                                        <NavDropdownMenuUser />
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                            </div>
                         </div>
                     </UserProvider>
                 </div>

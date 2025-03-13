@@ -4,10 +4,15 @@ import Link from 'next/link'
 import { Button } from "@/components/ui/button"
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu"
 import { useUser, LoginButton, LogoutButton } from '@/app/components/context/nav-user-context'
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { FiUser } from 'react-icons/fi'
+import { getAvatarUrl } from '@/app/components/user/avatar'
+import { useTheme } from "next-themes"
 
 export function NavUser() {
-    const { isLoggedIn, username } = useUser()
-    if (!isLoggedIn) {
+    const { isLoggedIn, username, openProfile } = useUser()
+    const { theme } = useTheme()
+    if (!isLoggedIn || username == null) {
         return (
             <>
                 <LoginButton variant="outline" className="mr-2">登入</LoginButton>
@@ -18,15 +23,24 @@ export function NavUser() {
         )
     }
     return (
-        <>
-            <span className="text-foreground mr-3" >{username}</span>
-            <LogoutButton variant="outline">登出</LogoutButton>
-        </>
+        <Button
+            variant="ghost"
+            size="icon"
+            className="rounded-full mr-2"
+            onClick={openProfile}
+        >
+            <Avatar>
+                <AvatarImage src={getAvatarUrl(username, theme == "dark")} />
+                <AvatarFallback>
+                    <FiUser className="h-5 w-5" />
+                </AvatarFallback>
+            </Avatar>
+        </Button>
     )
 }
 
 export function NavDropdownMenuUser() {
-    const { isLoggedIn, username } = useUser()
+    const { isLoggedIn, username, openProfile } = useUser()
     if (!isLoggedIn) {
         return (
             <>
@@ -42,7 +56,7 @@ export function NavDropdownMenuUser() {
     return (
         <>
             <DropdownMenuItem asChild>
-                <span className="text-foreground mr-2" >{username}</span>
+                <Button variant="outline" className="mr-2" onClick={openProfile}>{username}</Button>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
                 <LogoutButton>登出</LogoutButton>

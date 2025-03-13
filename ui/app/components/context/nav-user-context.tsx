@@ -6,12 +6,16 @@ import createClient from "openapi-fetch";
 import type { paths } from "@/app/openapi/openapi";
 import { usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { makeCallbackUrl } from '@/app/constants';
 import { useToast } from '@/hooks/use-toast';
+import { UserProfileDropdown } from '@/app/components/user-profile';
+import { LoginPanel } from '@/app/components/login-panel';
 
 type UserContextType = {
     username: string | null;
     isLoggedIn: boolean;
+    openProfile: () => void;
+    openLoginPanel: () => void;
+    refreshUserProvider: () => void;
 };
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -19,11 +23,17 @@ const client = createClient<paths>({ baseUrl: BACKEND_API_BASE_URL });
 
 export function UserProvider({ children }: { children: ReactNode }) {
     const pathname = usePathname();
+    const [componentStatus, setComponentStatus] = useState(false)
     const [isLoggedIn, setIsLoggedIn] = useState(false)
     const [username, setUsername] = useState<string | null>(null)
+    const [isProfileOpen, setIsProfileOpen] = useState(false)
+    const [isLoginPanelOpen, setIsLoginPanelOpen] = useState(false)
     const ctx: UserContextType = {
         username,
         isLoggedIn,
+        openProfile: () => setIsProfileOpen(true),
+        openLoginPanel: () => setIsLoginPanelOpen(true),
+        refreshUserProvider: () => setComponentStatus(!componentStatus),
     };
 
     useEffect(() => {
@@ -37,12 +47,16 @@ export function UserProvider({ children }: { children: ReactNode }) {
                 setIsLoggedIn(true);
                 setUsername(username);
             }
+            console.log('User status:', username);
         })();
-    }, [pathname]);
+    }, [pathname, componentStatus]);
 
     return (
         <UserContext.Provider value={ctx}>
             {children}
+            {/* User Profile */}
+            {isProfileOpen && <UserProfileDropdown onClose={() => setIsProfileOpen(false)} />}
+            {isLoginPanelOpen && <LoginPanel onClose={() => setIsLoginPanelOpen(false)} />}
         </UserContext.Provider>
     );
 }
@@ -51,34 +65,9 @@ export function LoginButton({
     children,
     ...props
 }: React.ComponentProps<typeof Button>) {
-    const { toast } = useToast();
-    async function handleLogin() {
-        const { error, response } = await client.GET("/auth/login", {
-            params: {
-                query: {
-                    redirect_url: makeCallbackUrl(new URL(location.href)),
-                },
-            },
-        });
-        if (!error) {
-            const authUrl = response?.headers.get('Location')
-            if (authUrl) {
-                location.href = authUrl;
-                return
-            }else{
-                console.error('Error during login: Authorization URL not received');
-            }
-        }else{
-            console.error('Error during login:', error);
-        }
-        toast({
-            title: "登入失敗",
-            description: "無法跳轉到登入網頁，請稍後再試。",
-            variant: "destructive",
-        });
-    }
+    const { openLoginPanel } = useUser();
     return (
-        <Button onClick={handleLogin} {...props}>{children}</Button>
+        <Button onClick={openLoginPanel} {...props}>{children}</Button>
     );
 }
 
