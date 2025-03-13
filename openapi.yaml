@@ -36,6 +36,13 @@ components:
         - user
         - bid
         - time
+    SSOProvider:
+      type: string
+      enum:
+        - internal
+        - google
+        - github
+        - microsoft
 
 paths:
   /auction/item:
@@ -414,14 +421,20 @@ paths:
                 properties:
                   message:
                     type: string
-  /auth/login:
+  /auth/sso/{provider}/login:
     get:
       summary: Obtain authentication url
       tags: 
         - Authentication
       description: Obtain authentication url and redirect.
       parameters:
-        - name: redirect_url
+        - name: provider
+          in: path
+          description: Authentication provider.
+          required: true
+          schema:
+            $ref: "#/components/schemas/SSOProvider"
+        - name: redirectUrl
           in: query
           description: Url to back after finishing authorization.
           required: true
@@ -442,18 +455,43 @@ paths:
               schema:
                 type: string
                 example: "Set-Cookie nonce=xxx.xxx.xxx; HttpOnly; Secure; Max-Age=3600"
+            Set-Cookie|requestRedirectUrl|HttpOnly;Secure;Max-Age=120:
+              description: "Add redirect url into secure http only cookie."
+              schema:
+                type: string
+                example: "Set-Cookie state=https://example.com; HttpOnly; Secure; Max-Age=3600"
             Location:
               description: The location of the login page of authentication server.
               schema:
                 type: string
                 format: uri
-  /auth/callback:
+        '404':
+          description: Authentication provider not found.
+  /auth/sso/{provider}/callback:
     get:
       summary: Exchange authorization code
       tags: 
         - Authentication
       description: Exchange authorization code to finish authentication flow and redirect to origin page.
       parameters:
+        - name: provider
+          in: path
+          description: Authentication provider.
+          required: true
+          schema:
+            $ref: "#/components/schemas/SSOProvider"
+        - name: code
+          in: query
+          description: Authorization code.
+          required: true
+          schema:
+            type: string
+        - name: state
+          in: query
+          description: Authorization state.
+          required: true
+          schema:
+            type: string
         - name: requestState
           in: cookie
           description: Stored authentication state.
@@ -468,34 +506,17 @@ paths:
           schema:
             type: string
             example: n_xxxxxxxxxx
-        - name: code
-          in: query
-          description: Authorization code.
-          required: true
+        - name: requestRedirectUrl
+          in: cookie
+          description: Stored redirect url.
+          required: false
           schema:
             type: string
-        - name: state
-          in: query
-          description: Authorization state.
-          required: true
-          schema:
-            type: string
-        - name: redirect_url
-          in: query
-          description: Url to back after finishing authorization.
-          required: true
-          schema:
-            type: string
-            format: uri
+            example: https://example.com
       responses:
         '200':
           description: Authentication successfully.
           headers:
-            Location:
-              description: The location of the origin page before login.
-              schema:
-                type: string
-                format: uri
             Unset-Cookie|requestState|HttpOnly;Secure:
               description: "Remove authentication state from secure http only cookie."
               schema:
@@ -506,6 +527,11 @@ paths:
               schema:
                 type: string
                 example: "Set-Cookie nonce=; HttpOnly; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
+            Unset-Cookie|requestRedirectUrl|HttpOnly;Secure:
+              description: "Remove redirect url from secure http only cookie."
+              schema:
+                type: string
+                example: "Set-Cookie state=; HttpOnly; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
             Set-Cookie|accessToken|HttpOnly;Secure;Max-Age=10800:
               description: "Add access token into secure http only cookie."
               schema:
@@ -517,6 +543,8 @@ paths:
               schema:
                 type: string
                 example: "username=XXXX; Secure; Max-Age=3600"
+        '404':
+          description: Authentication provider not found.
   /auth/logout:
     get:
       summary: Revoke authentication token
