@@ -695,10 +695,14 @@ func (impl *ServerImpl) GetAuthSsoProviderCallback(ctx context.Context, request 
 	if err != nil {
 		return nil, fmt.Errorf("[%s] Fail to sign JWT, err=%w", op, err)
 	}
+	name := idTokenClaims.Nickname
+	if len(name) == 0 {
+		name = idTokenClaims.Name
+	}
 	return openapi.GetAuthSsoProviderCallback200Response{
 		Headers: openapi.GetAuthSsoProviderCallback200ResponseHeaders{
 			SetCookieAccessTokenHttpOnlySecureMaxAge10800: q4TokenString,
-			SetCookieUsernameMaxAge10800:                  idTokenClaims.Nickname,
+			SetCookieUsernameMaxAge10800:                  base64.StdEncoding.EncodeToString([]byte(name)),
 		},
 	}, nil
 }

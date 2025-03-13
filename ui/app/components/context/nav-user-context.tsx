@@ -45,7 +45,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
                 setUsername(null);
             } else {
                 setIsLoggedIn(true);
-                setUsername(username);
+                setUsername(Buffer.from(username, 'base64').toString('utf-8'));
             }
             console.log('User status:', username);
         })();

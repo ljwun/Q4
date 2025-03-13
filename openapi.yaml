@@ -542,7 +542,7 @@ paths:
               description: "Add username into secure cookie."
               schema:
                 type: string
-                example: "username=XXXX; Secure; Max-Age=3600"
+                example: "username=base64(XXXX); Secure; Max-Age=3600"
         '404':
           description: Authentication provider not found.
   /auth/logout:
