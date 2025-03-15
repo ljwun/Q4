@@ -122,12 +122,12 @@ export interface paths {
                          * @default title
                          * @enum {string}
                          */
-                        key?: "title" | "startPrice" | "currentBid" | "startTime" | "endTime";
+                        key?: PathsAuctionItemsGetParametersQuerySortKey;
                         /**
                          * @default asc
                          * @enum {string}
                          */
-                        order?: "asc" | "desc";
+                        order?: PathsAuctionItemsGetParametersQuerySortOrder;
                     };
                     /** @description The last item ID of the previous page. */
                     lastItemID?: string;
@@ -524,6 +524,13 @@ export interface paths {
                     };
                     content?: never;
                 };
+                /** @description Invalid data provided to verify. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
                 /** @description Authentication provider not found. */
                 404: {
                     headers: {
@@ -673,7 +680,7 @@ export interface components {
             time: Date;
         };
         /** @enum {string} */
-        SSOProvider: "internal" | "google" | "github" | "microsoft";
+        SSOProvider: SSOProvider;
     };
     responses: never;
     parameters: never;
@@ -682,4 +689,21 @@ export interface components {
     pathItems: never;
 }
 export type $defs = Record<string, never>;
+export enum PathsAuctionItemsGetParametersQuerySortKey {
+    title = "title",
+    startPrice = "startPrice",
+    currentBid = "currentBid",
+    startTime = "startTime",
+    endTime = "endTime"
+}
+export enum PathsAuctionItemsGetParametersQuerySortOrder {
+    asc = "asc",
+    desc = "desc"
+}
+export enum SSOProvider {
+    Internal = "Internal",
+    Google = "Google",
+    GitHub = "GitHub",
+    Microsoft = "Microsoft"
+}
 export type operations = Record<string, never>;
