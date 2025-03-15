@@ -14,7 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { X } from 'lucide-react'
 import { Switch } from "@/components/ui/switch"
 
-import type { paths, Defined } from "@/app/openapi"
+import { paths, Defined, PathsAuctionItemsGetParametersQuerySortKey as sortKey, PathsAuctionItemsGetParametersQuerySortOrder as sortOrder } from "@/app/openapi"
 import { useSearchBar } from './searchbar-context';
 import { DateTimePicker } from '@/app/components/date-time-picker'
 
@@ -113,11 +113,11 @@ export function SearchBar({ searchRequest }: { searchRequest: searchRequestType 
                                     <SelectValue placeholder="選擇排序依據" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="name">名稱</SelectItem>
-                                    <SelectItem value="startPrice">起拍價格</SelectItem>
-                                    <SelectItem value="currentBid">當前出價</SelectItem>
-                                    <SelectItem value="startTime">開始時間</SelectItem>
-                                    <SelectItem value="endTime">結束時間</SelectItem>
+                                    <SelectItem value={sortKey.title}>名稱</SelectItem>
+                                    <SelectItem value={sortKey.startPrice}>起拍價格</SelectItem>
+                                    <SelectItem value={sortKey.currentBid}>當前出價</SelectItem>
+                                    <SelectItem value={sortKey.startTime}>開始時間</SelectItem>
+                                    <SelectItem value={sortKey.endTime}>結束時間</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
@@ -130,8 +130,8 @@ export function SearchBar({ searchRequest }: { searchRequest: searchRequestType 
                                     <SelectValue placeholder="選擇排序順序" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="asc">升序</SelectItem>
-                                    <SelectItem value="desc">降序</SelectItem>
+                                    <SelectItem value={sortOrder.asc}>升序</SelectItem>
+                                    <SelectItem value={sortOrder.desc}>降序</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>

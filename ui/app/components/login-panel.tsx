@@ -7,15 +7,9 @@ import { FiX } from "react-icons/fi"
 import { Button } from "@/components/ui/button"
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { components, Defined } from "@/app/openapi";
+import { SSOProvider } from "@/app/openapi";
 import { login } from "@/app/components/user/login";
 import { useUser } from '@/app/components/context/nav-user-context';
-
-type SSOProviderType = Defined<components["schemas"]["SSOProvider"]>
-const internalProvider: SSOProviderType = "internal"
-const googleProvider: SSOProviderType = "google"
-const githubProvider: SSOProviderType = "github"
-const microsoftProvider: SSOProviderType = "microsoft"
 
 interface LoginPanelProps {
     onClose: () => void
@@ -39,7 +33,7 @@ export function LoginPanel({ onClose }: LoginPanelProps) {
         setTimeout(onClose, 300)
     }
 
-    const handleLogin = async (provider: SSOProviderType) => {
+    const handleLogin = async (provider: SSOProvider) => {
         await login(provider, toast, () => {
             refresh()
             handleClose()
@@ -72,7 +66,7 @@ export function LoginPanel({ onClose }: LoginPanelProps) {
                         <Button
                             variant="outline"
                             className="w-full h-12 flex items-center justify-center gap-3 text-base hover:bg-muted/60"
-                            onClick={() => handleLogin(internalProvider)}
+                            onClick={() => handleLogin(SSOProvider.Internal)}
                         >
                             <SiAuthentik className="h-5 w-5" />
                             <span>使用 Internal 登入</span>
@@ -81,7 +75,7 @@ export function LoginPanel({ onClose }: LoginPanelProps) {
                         <Button
                             variant="outline"
                             className="w-full h-12 flex items-center justify-center gap-3 text-base hover:bg-muted/60"
-                            onClick={() => handleLogin(googleProvider)}
+                            onClick={() => handleLogin(SSOProvider.Google)}
                         >
                             <FaGoogle className="h-5 w-5" />
                             <span>使用 Google 登入</span>
@@ -91,17 +85,17 @@ export function LoginPanel({ onClose }: LoginPanelProps) {
                             variant="outline"
                             className="w-full h-12 flex items-center justify-center gap-3 text-base hover:bg-muted/60"
                             disabled
-                            onClick={() => handleLogin(githubProvider)}
+                            onClick={() => handleLogin(SSOProvider.GitHub)}
                         >
                             <FaGithub className="h-5 w-5" />
-                            <span>使用 Github 登入</span>
+                            <span>使用 GitHub 登入</span>
                         </Button>
 
                         <Button
                             variant="outline"
                             className="w-full h-12 flex items-center justify-center gap-3 text-base hover:bg-muted/60"
                             disabled
-                            onClick={() => handleLogin(microsoftProvider)}
+                            onClick={() => handleLogin(SSOProvider.Microsoft)}
                         >
                             <FaMicrosoft className="h-5 w-5" />
                             <span>使用 Microsoft 登入</span>

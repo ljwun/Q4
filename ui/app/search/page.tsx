@@ -4,7 +4,7 @@ import {SearchBarProvider} from './searchbar-context'
 import {SearchBar} from './searchbar'
 import {ProductList} from "./product-list"
 import {SearchBarActivator} from './hide-searchbar'
-import type { Defined, paths } from "@/app/openapi"
+import type { Defined, paths, PathsAuctionItemsGetParametersQuerySortKey as sortKey, PathsAuctionItemsGetParametersQuerySortOrder as sortOrder } from "@/app/openapi"
 import { EnhancedSearchParams } from '@/app/utils';
 
 type searchRequestType = Defined<paths["/auction/items"]["get"]["parameters"]["query"]>
@@ -34,8 +34,8 @@ export default async function SearchPage({
             to: params.getDate('endTime[to]'),
         },
         sort: {
-            key: params.getString('sort[key]') as "title" | "startPrice" | "currentBid" | "startTime" | "endTime" | undefined,
-            order: params.getString('sort[order]') as "asc" | "desc" | undefined,
+            key: params.getString('sort[key]') as sortKey | undefined,
+            order: params.getString('sort[order]') as sortOrder | undefined,
         },
         excludeEnded: params.getString('excludeEnded') === 'on' ? true : undefined,
     };
