@@ -11,5 +11,5 @@ type User struct {
 	gorm.Model
 
 	ID       uuid.UUID `gorm:"type:uuid;default:public.uuid_generate_v7();primaryKey;<-:false"`
-	Username string    `gorm:"type:varchar(255);uniqueIndex;not null;<-:create"`
+	Username string    `gorm:"type:varchar(255);not null;<-:create"`
 }

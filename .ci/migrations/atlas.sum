@@ -1,3 +1,5 @@
-h1:chfULiu7872b7z1LF/UMo4B4gogpmkUm2RCxvPNTing=
+h1:ENuEtzQc3CP7v9r83V9k6pg/HlkzYJgPBCSzGO+bq9k=
 20250302091743_init.sql h1:xEs3c7gI0bO9v4E6//EPszTYVu+5gVyqc4KIcdKVdDA=
 20250309141752_add_image.sql h1:v2NuyIKvdRkxlJLQ2XkD99G+o6DWBT2o7yxAdCvIx/Y=
+20250315091512_add_sso.sql h1:rvUCBE1YwqX8BpTXouFDgkrE8yYrVsAw4X+A1VmPshc=
+20250315091522_insert_default_sso_provider.sql h1:z34shOTGrMKIiQpBDBiyxe/YFgINCkprcMiu57mPmCw=
