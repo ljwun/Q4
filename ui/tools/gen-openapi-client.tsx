@@ -26,6 +26,7 @@ async function fn() {
         return schemaObject.nullable ? ts.factory.createUnionTypeNode([DATE, NULL]) : DATE;
       }
     },
+    enum: true,
   });
   const output = astToString(ast);
   console.log(`finish generating typescript code, start writing to ${OutputPath}`);
