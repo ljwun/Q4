@@ -8,6 +8,8 @@ tags:
     description: Endpoints for managing auction items, bidding, and tracking auction events.
   - name: Authentication
     description: Endpoints for user authentication and authorization.
+  - name: user
+    description: Endpoints for managing users.
   - name: Image
     description: Endpoints for managing images.
 
@@ -39,6 +41,22 @@ components:
     SSOProvider:
       type: string
       enum:
+        - Internal
+        - Google
+        - GitHub
+        - Microsoft
+    SSOProviderConnectStatus:
+      type: object
+      properties:
+        Internal:
+          type: boolean
+        Google:
+          type: boolean
+        GitHub:
+          type: boolean
+        Microsoft:
+          type: boolean
+      required:
         - Internal
         - Google
         - GitHub
@@ -583,6 +601,68 @@ paths:
               schema:
                 type: string
                 example: "username=; HttpOnly; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
+  /user/info:
+    get:
+      summary: Get user information
+      tags:
+        - user
+      description: Retrieve user information.
+      parameters:
+        - name: accessToken
+          in: cookie
+          description: access token for current user.
+          required: false
+          schema:
+            type: string
+            example: Bob
+      responses:
+        '200':
+          description: Successful retrieval of user information.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  username:
+                    type: string
+                  ssoProviders:
+                    $ref: "#/components/schemas/SSOProviderConnectStatus"
+                required:
+                  - username
+                  - ssoProviders
+        '401':
+          description: Unauthorized access.
+    patch:
+      summary: Update user information
+      tags:
+        - user
+      description: Update user information.
+      parameters:
+        - name: accessToken
+          in: cookie
+          description: access token for current user.
+          required: false
+          schema:
+            type: string
+            example: Bob
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+              required:
+                - username
+      responses:
+        '200':
+          description: User information updated successfully.
+        '400':
+          description: Invalid data provided.
+        '401':
+          description: Unauthorized access.
   /image:
     post:
       summary: Upload an image
