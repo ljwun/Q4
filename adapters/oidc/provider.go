@@ -3,11 +3,17 @@ package oidc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
+)
+
+var (
+	ErrStateMismatch = errors.New("state mismatch")
+	ErrNonceMismatch = errors.New("nonce mismatch")
 )
 
 type Provider struct {
@@ -51,7 +57,7 @@ func (p *Provider) AuthURL(state, nonce, redirectUrl string, scopes []string, op
 func (p *Provider) Exchange(ctx context.Context, verifier *ExchangeVerifier, code, state, redirectUrl string) (*ExchangeToken, error) {
 	const op = "Exchange"
 	if !verifier.VerifyState(state) {
-		return nil, fmt.Errorf("[%s] State mismatch", op)
+		return nil, ErrStateMismatch
 	}
 	config := oauth2.Config{
 		ClientID:     p.clientInfo.ID,
@@ -72,14 +78,14 @@ func (p *Provider) Exchange(ctx context.Context, verifier *ExchangeVerifier, cod
 		return nil, fmt.Errorf("[%s] Failed to verify ID Token, err=%w", op, err)
 	}
 	if !verifier.VerifyNonce(idToken.Nonce) {
-		return nil, fmt.Errorf("[%s] Nonce mismatch", op)
+		return nil, ErrNonceMismatch
 	}
 	token := &ExchangeToken{
-		OAuth2Token:   oauth2Token,
-		IDTokenClaims: new(json.RawMessage),
+		OAuth2Token: oauth2Token,
+		IDToken:     IDToken{internal: idToken},
 	}
-	if err := idToken.Claims(token.IDTokenClaims); err != nil {
-		return nil, fmt.Errorf("[%s] err=%w", op, err)
+	if err := idToken.Claims(&token.IDToken); err != nil {
+		return nil, fmt.Errorf("[%s] Failed to parse ID Token claims, err=%w", op, err)
 	}
 
 	return token, nil
@@ -120,6 +126,6 @@ func (p *Provider) SendClientAuthRequest(req *http.Request) (*json.RawMessage, e
 }
 
 type ExchangeToken struct {
-	OAuth2Token   *oauth2.Token
-	IDTokenClaims *json.RawMessage
+	OAuth2Token *oauth2.Token
+	IDToken     IDToken
 }
