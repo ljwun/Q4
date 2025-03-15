@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -37,7 +36,7 @@ import (
 )
 
 type ServerImpl struct {
-	oidcProviders map[openapi.SSOProvider]*oidc.ExtendedProvider
+	oidcProviders map[openapi.SSOProvider]*oidc.Provider
 	sseManager    sse.IConnectionManager[openapi.BidEvent]
 	s3Operator    *internalS3.S3Operator
 	htmlChecker   *bluemonday.Policy
@@ -55,9 +54,9 @@ func NewServer(config ServerConfig) (*ServerImpl, error) {
 	const op = "NewServer"
 
 	// 初始化OIDC提供者
-	oidcProviders := make(map[openapi.SSOProvider]*oidc.ExtendedProvider, len(config.OIDC.Providers))
+	oidcProviders := make(map[openapi.SSOProvider]*oidc.Provider, len(config.OIDC.Providers))
 	for provider, providerConfig := range config.OIDC.Providers {
-		oidcProvider, err := oidc.NewExtendedProvider(providerConfig.IssuerURL, providerConfig.ClientID, providerConfig.ClientSecret)
+		oidcProvider, err := oidc.NewProvider(providerConfig.IssuerURL, providerConfig.ClientID, providerConfig.ClientSecret)
 		if err != nil {
 			return nil, fmt.Errorf("[%s] Fail to initial OIDC provider, provider=%s, err=%w", op, provider, err)
 		}
@@ -124,6 +123,9 @@ func NewServer(config ServerConfig) (*ServerImpl, error) {
 		sse.WithLogger[openapi.BidEvent](slog.Default()),
 		sse.WithSubscriber(consumer),
 	)
+	if err != nil {
+		return nil, fmt.Errorf("[%s] Fail to create sse connection manager, err=%w", op, err)
+	}
 
 	// 初始化group consumer
 	groupConsumer, err := redisAdapter.NewGroupConsumer[BidInfo](
@@ -664,29 +666,41 @@ func (impl *ServerImpl) GetAuthSsoProviderCallback(ctx context.Context, request 
 		requestRedirectUrl = *request.Params.RequestRedirectUrl
 	}
 	token, err := provider.Exchange(ctx, verifier, request.Params.Code, request.Params.State, requestRedirectUrl)
+	if errors.Is(err, oidc.ErrStateMismatch) || errors.Is(err, oidc.ErrNonceMismatch) {
+		return openapi.GetAuthSsoProviderCallback400Response{}, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("[%s] Fail to exchange token, err=%w", op, err)
 	}
-	// 從id token中取得使用者資料
-	var idTokenClaims oidc.UserInfo
-	if err := json.Unmarshal(*token.IDTokenClaims, &idTokenClaims); err != nil {
-		return nil, fmt.Errorf("[%s] Fail to retrieve email from id token, err=%w", op, err)
+	// 關聯使用者資料(用於關聯使用者操作)
+	// 如果 identity 不存在，會建立新的使用者
+	ssoProvider := models.SsoProvider{Name: request.Provider}
+	if result := impl.db.Where(&ssoProvider).First(&ssoProvider); result.Error != nil {
+		return nil, fmt.Errorf("[%s] Fail to find sso provider %s, err=%w", op, request.Provider, result.Error)
 	}
-	// 建立使用者資料(用於關聯使用者操作)
-	var user models.User
-	result := impl.db.FirstOrCreate(&user, &models.User{Username: idTokenClaims.Name})
-	if result.Error != nil {
-		return nil, fmt.Errorf("[%s] Fail to create user, err=%w", op, result.Error)
+	userIdentity := models.UserIdentity{
+		SsoProviderID: ssoProvider.ID,
+		Identity:      token.IDToken.Sub,
+	}
+	if result := impl.db.Preload("User").Where(&userIdentity).First(&userIdentity); result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("[%s] Fail to get user identity, err=%w", op, result.Error)
+	} else if result.Error != nil {
+		userIdentity.User = &models.User{
+			Username: token.IDToken.Name,
+		}
+		if result := impl.db.Create(&userIdentity); result.Error != nil {
+			return nil, fmt.Errorf("[%s] Fail to create user identity, err=%w", op, result.Error)
+		}
 	}
 	// 建立token
 	q4Token := jwt.NewWithClaims(&jwt.SigningMethodEd25519{}, openapi.JWT{
-		Username: idTokenClaims.Name,
+		Username: userIdentity.User.Username,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(impl.config.Auth.ExpireDuration)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			NotBefore: jwt.NewNumericDate(time.Now()),
 			Issuer:    impl.config.Auth.Issuer,
-			Subject:   user.ID.String(),
+			Subject:   userIdentity.User.ID.String(),
 			ID:        uuid.NewString(),
 			Audience:  []string{impl.config.Auth.Audience},
 		},
@@ -695,14 +709,10 @@ func (impl *ServerImpl) GetAuthSsoProviderCallback(ctx context.Context, request 
 	if err != nil {
 		return nil, fmt.Errorf("[%s] Fail to sign JWT, err=%w", op, err)
 	}
-	name := idTokenClaims.Nickname
-	if len(name) == 0 {
-		name = idTokenClaims.Name
-	}
 	return openapi.GetAuthSsoProviderCallback200Response{
 		Headers: openapi.GetAuthSsoProviderCallback200ResponseHeaders{
 			SetCookieAccessTokenHttpOnlySecureMaxAge10800: q4TokenString,
-			SetCookieUsernameMaxAge10800:                  base64.StdEncoding.EncodeToString([]byte(name)),
+			SetCookieUsernameMaxAge10800:                  base64.StdEncoding.EncodeToString([]byte(userIdentity.User.Username)),
 		},
 	}, nil
 }
