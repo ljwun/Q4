@@ -39,10 +39,10 @@ components:
     SSOProvider:
       type: string
       enum:
-        - internal
-        - google
-        - github
-        - microsoft
+        - Internal
+        - Google
+        - GitHub
+        - Microsoft
 
 paths:
   /auction/item:
