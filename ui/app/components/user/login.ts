@@ -68,8 +68,6 @@ export async function login(provider: SSOProviderType, toast: (props: { title: s
                     title: "登入成功",
                     description: "登入成功",
                 });
-                authWindow?.close()
-                
                 break
             case LoginStatus.loginFailed:
                 toast({
@@ -80,6 +78,7 @@ export async function login(provider: SSOProviderType, toast: (props: { title: s
                 console.log('Error during login:', message.error);
                 break
         }
+        authWindow?.close()
         if (refresher) {
             refresher()
         }
