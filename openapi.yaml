@@ -543,6 +543,8 @@ paths:
               schema:
                 type: string
                 example: "username=base64(XXXX); Secure; Max-Age=3600"
+        "400":
+          description: Invalid data provided to verify.
         '404':
           description: Authentication provider not found.
   /auth/logout:
