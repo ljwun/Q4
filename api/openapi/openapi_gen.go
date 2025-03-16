@@ -67,6 +67,14 @@ type BidEvent struct {
 // SSOProvider defines model for SSOProvider.
 type SSOProvider string
 
+// SSOProviderConnectStatus defines model for SSOProviderConnectStatus.
+type SSOProviderConnectStatus struct {
+	GitHub    bool `json:"GitHub"`
+	Google    bool `json:"Google"`
+	Internal  bool `json:"Internal"`
+	Microsoft bool `json:"Microsoft"`
+}
+
 // PostAuctionItemJSONBody defines parameters for PostAuctionItem.
 type PostAuctionItemJSONBody struct {
 	Carousels     *[]string  `json:"carousels,omitempty"`
@@ -184,11 +192,31 @@ type PostImageParams struct {
 	AccessToken *string `form:"accessToken,omitempty" json:"accessToken,omitempty"`
 }
 
+// GetUserInfoParams defines parameters for GetUserInfo.
+type GetUserInfoParams struct {
+	// AccessToken access token for current user.
+	AccessToken *string `form:"accessToken,omitempty" json:"accessToken,omitempty"`
+}
+
+// PatchUserInfoJSONBody defines parameters for PatchUserInfo.
+type PatchUserInfoJSONBody struct {
+	Username string `json:"username"`
+}
+
+// PatchUserInfoParams defines parameters for PatchUserInfo.
+type PatchUserInfoParams struct {
+	// AccessToken access token for current user.
+	AccessToken *string `form:"accessToken,omitempty" json:"accessToken,omitempty"`
+}
+
 // PostAuctionItemJSONRequestBody defines body for PostAuctionItem for application/json ContentType.
 type PostAuctionItemJSONRequestBody PostAuctionItemJSONBody
 
 // PostAuctionItemItemIDBidsJSONRequestBody defines body for PostAuctionItemItemIDBids for application/json ContentType.
 type PostAuctionItemItemIDBidsJSONRequestBody PostAuctionItemItemIDBidsJSONBody
+
+// PatchUserInfoJSONRequestBody defines body for PatchUserInfo for application/json ContentType.
+type PatchUserInfoJSONRequestBody PatchUserInfoJSONBody
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -219,6 +247,12 @@ type ServerInterface interface {
 	// Upload an image
 	// (POST /image)
 	PostImage(c *gin.Context, params PostImageParams)
+	// Get user information
+	// (GET /user/info)
+	GetUserInfo(c *gin.Context, params GetUserInfoParams)
+	// Update user information
+	// (PATCH /user/info)
+	PatchUserInfo(c *gin.Context, params PatchUserInfoParams)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -670,6 +704,72 @@ func (siw *ServerInterfaceWrapper) PostImage(c *gin.Context) {
 	siw.Handler.PostImage(c, params)
 }
 
+// GetUserInfo operation middleware
+func (siw *ServerInterfaceWrapper) GetUserInfo(c *gin.Context) {
+
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetUserInfoParams
+
+	{
+		var cookie string
+
+		if cookie, err = c.Cookie("accessToken"); err == nil {
+			var value string
+			err = runtime.BindStyledParameterWithOptions("simple", "accessToken", cookie, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+			if err != nil {
+				siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter accessToken: %w", err), http.StatusBadRequest)
+				return
+			}
+			params.AccessToken = &value
+
+		}
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetUserInfo(c, params)
+}
+
+// PatchUserInfo operation middleware
+func (siw *ServerInterfaceWrapper) PatchUserInfo(c *gin.Context) {
+
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PatchUserInfoParams
+
+	{
+		var cookie string
+
+		if cookie, err = c.Cookie("accessToken"); err == nil {
+			var value string
+			err = runtime.BindStyledParameterWithOptions("simple", "accessToken", cookie, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+			if err != nil {
+				siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter accessToken: %w", err), http.StatusBadRequest)
+				return
+			}
+			params.AccessToken = &value
+
+		}
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PatchUserInfo(c, params)
+}
+
 // GinServerOptions provides options for the Gin server.
 type GinServerOptions struct {
 	BaseURL      string
@@ -706,6 +806,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/auth/sso/:provider/callback", wrapper.GetAuthSsoProviderCallback)
 	router.GET(options.BaseURL+"/auth/sso/:provider/login", wrapper.GetAuthSsoProviderLogin)
 	router.POST(options.BaseURL+"/image", wrapper.PostImage)
+	router.GET(options.BaseURL+"/user/info", wrapper.GetUserInfo)
+	router.PATCH(options.BaseURL+"/user/info", wrapper.PatchUserInfo)
 }
 
 type PostAuctionItemRequestObject struct {
@@ -1186,6 +1288,67 @@ func (response PostImage429Response) VisitPostImageResponse(w http.ResponseWrite
 	return nil
 }
 
+type GetUserInfoRequestObject struct {
+	Params GetUserInfoParams
+}
+
+type GetUserInfoResponseObject interface {
+	VisitGetUserInfoResponse(w http.ResponseWriter) error
+}
+
+type GetUserInfo200JSONResponse struct {
+	SsoProviders SSOProviderConnectStatus `json:"ssoProviders"`
+	Username     string                   `json:"username"`
+}
+
+func (response GetUserInfo200JSONResponse) VisitGetUserInfoResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetUserInfo401Response struct {
+}
+
+func (response GetUserInfo401Response) VisitGetUserInfoResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type PatchUserInfoRequestObject struct {
+	Params PatchUserInfoParams
+	Body   *PatchUserInfoJSONRequestBody
+}
+
+type PatchUserInfoResponseObject interface {
+	VisitPatchUserInfoResponse(w http.ResponseWriter) error
+}
+
+type PatchUserInfo200Response struct {
+}
+
+func (response PatchUserInfo200Response) VisitPatchUserInfoResponse(w http.ResponseWriter) error {
+	w.WriteHeader(200)
+	return nil
+}
+
+type PatchUserInfo400Response struct {
+}
+
+func (response PatchUserInfo400Response) VisitPatchUserInfoResponse(w http.ResponseWriter) error {
+	w.WriteHeader(400)
+	return nil
+}
+
+type PatchUserInfo401Response struct {
+}
+
+func (response PatchUserInfo401Response) VisitPatchUserInfoResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// Add a new auction item
@@ -1215,6 +1378,12 @@ type StrictServerInterface interface {
 	// Upload an image
 	// (POST /image)
 	PostImage(ctx context.Context, request PostImageRequestObject) (PostImageResponseObject, error)
+	// Get user information
+	// (GET /user/info)
+	GetUserInfo(ctx context.Context, request GetUserInfoRequestObject) (GetUserInfoResponseObject, error)
+	// Update user information
+	// (PATCH /user/info)
+	PatchUserInfo(ctx context.Context, request PatchUserInfoRequestObject) (PatchUserInfoResponseObject, error)
 }
 
 type StrictHandlerFunc = strictgin.StrictGinHandlerFunc
@@ -1493,48 +1662,113 @@ func (sh *strictHandler) PostImage(ctx *gin.Context, params PostImageParams) {
 	}
 }
 
+// GetUserInfo operation middleware
+func (sh *strictHandler) GetUserInfo(ctx *gin.Context, params GetUserInfoParams) {
+	var request GetUserInfoRequestObject
+
+	request.Params = params
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetUserInfo(ctx, request.(GetUserInfoRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetUserInfo")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		ctx.Error(err)
+		ctx.Status(http.StatusInternalServerError)
+	} else if validResponse, ok := response.(GetUserInfoResponseObject); ok {
+		if err := validResponse.VisitGetUserInfoResponse(ctx.Writer); err != nil {
+			ctx.Error(err)
+		}
+	} else if response != nil {
+		ctx.Error(fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PatchUserInfo operation middleware
+func (sh *strictHandler) PatchUserInfo(ctx *gin.Context, params PatchUserInfoParams) {
+	var request PatchUserInfoRequestObject
+
+	request.Params = params
+
+	var body PatchUserInfoJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		ctx.Status(http.StatusBadRequest)
+		ctx.Error(err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.PatchUserInfo(ctx, request.(PatchUserInfoRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PatchUserInfo")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		ctx.Error(err)
+		ctx.Status(http.StatusInternalServerError)
+	} else if validResponse, ok := response.(PatchUserInfoResponseObject); ok {
+		if err := validResponse.VisitPatchUserInfoResponse(ctx.Writer); err != nil {
+			ctx.Error(err)
+		}
+	} else if response != nil {
+		ctx.Error(fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
+	"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",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

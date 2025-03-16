@@ -594,6 +594,102 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/user/info": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get user information
+         * @description Retrieve user information.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: {
+                    /** @description access token for current user. */
+                    accessToken?: string;
+                };
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Successful retrieval of user information. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            username: string;
+                            ssoProviders: components["schemas"]["SSOProviderConnectStatus"];
+                        };
+                    };
+                };
+                /** @description Unauthorized access. */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update user information
+         * @description Update user information.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: {
+                    /** @description access token for current user. */
+                    accessToken?: string;
+                };
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        username: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description User information updated successfully. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Invalid data provided. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthorized access. */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        trace?: never;
+    };
     "/image": {
         parameters: {
             query?: never;
@@ -681,6 +777,12 @@ export interface components {
         };
         /** @enum {string} */
         SSOProvider: SSOProvider;
+        SSOProviderConnectStatus: {
+            Internal: boolean;
+            Google: boolean;
+            GitHub: boolean;
+            Microsoft: boolean;
+        };
     };
     responses: never;
     parameters: never;
