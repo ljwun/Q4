@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -750,6 +751,75 @@ func (impl *ServerImpl) GetAuthSsoProviderLogin(ctx context.Context, request ope
 func (impl *ServerImpl) GetAuthLogout(ctx context.Context, request openapi.GetAuthLogoutRequestObject) (openapi.GetAuthLogoutResponseObject, error) {
 	// only clear the cookie without revoking the token
 	return openapi.GetAuthLogout200Response{}, nil
+}
+
+// Get user information
+// (GET /user/info)
+func (impl *ServerImpl) GetUserInfo(ctx context.Context, request openapi.GetUserInfoRequestObject) (openapi.GetUserInfoResponseObject, error) {
+	const op = "GetUserInfo"
+	// 檢查使用者是否有權限取得使用者資訊
+	//  - 檢查是否有提供access token
+	if request.Params.AccessToken == nil {
+		return openapi.GetUserInfo401Response{}, nil
+	}
+	//  - 解析並驗證access token
+	token, err := openapi.ParseAndValidateJWT(*request.Params.AccessToken, impl.config.Auth.PrivateKey)
+	if err != nil {
+		slog.Error("Fail to parse and validate JWT", slog.String("op", op), slog.Any("error", err))
+		return openapi.GetUserInfo401Response{}, nil
+	}
+	// 取得使用者資訊
+	userId := uuid.MustParse(token.Subject)
+	user := models.User{ID: userId}
+	if result := impl.db.Preload("Identities").Preload("Identities.SsoProvider").First(&user); result.Error != nil {
+		return nil, fmt.Errorf("[%s] Fail to find user, err=%w", op, result.Error)
+	}
+	connectStatus := openapi.SSOProviderConnectStatus{}
+	for _, identity := range user.Identities {
+		switch identity.SsoProvider.Name {
+		case openapi.Internal:
+			connectStatus.Internal = true
+		case openapi.Google:
+			connectStatus.Google = true
+		case openapi.Microsoft:
+			connectStatus.Microsoft = true
+		case openapi.GitHub:
+			connectStatus.GitHub = true
+		}
+	}
+	return openapi.GetUserInfo200JSONResponse{
+		Username:     user.Username,
+		SsoProviders: connectStatus,
+	}, nil
+}
+
+// Update user information
+// (PATCH /user/info)
+func (impl *ServerImpl) PatchUserInfo(ctx context.Context, request openapi.PatchUserInfoRequestObject) (openapi.PatchUserInfoResponseObject, error) {
+	const op = "PatchUserInfo"
+	// 檢查使用者是否有權限更新使用者資訊
+	//  - 檢查是否有提供access token
+	if request.Params.AccessToken == nil {
+		return openapi.PatchUserInfo401Response{}, nil
+	}
+	//  - 解析並驗證access token
+	token, err := openapi.ParseAndValidateJWT(*request.Params.AccessToken, impl.config.Auth.PrivateKey)
+	if err != nil {
+		slog.Error("Fail to parse and validate JWT", slog.String("op", op), slog.Any("error", err))
+		return openapi.PatchUserInfo401Response{}, nil
+	}
+	// 檢查新的使用者名稱是否合法
+	username := strings.TrimSpace(request.Body.Username)
+	if len(username) == 0 {
+		return openapi.PatchUserInfo400Response{}, nil
+	}
+	// 更新使用者資訊
+	userId := uuid.MustParse(token.Subject)
+	user := models.User{ID: userId, Username: username}
+	if result := impl.db.Updates(user); result.Error != nil {
+		return nil, fmt.Errorf("[%s] Fail to update user info, err=%w", op, result.Error)
+	}
+	return openapi.PatchUserInfo200Response{}, nil
 }
 
 // Upload an image
