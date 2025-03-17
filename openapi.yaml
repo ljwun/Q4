@@ -565,6 +565,114 @@ paths:
           description: Invalid data provided to verify.
         '404':
           description: Authentication provider not found.
+  /auth/sso/{provider}/link:
+    post:
+      summary: Link SSO account to existing account.
+      tags: 
+        - Authentication
+      description: Link SSO account to existing account. It work like callback but without cookie and redirectUrl response.
+      parameters:
+        - name: provider
+          in: path
+          description: Authentication provider.
+          required: true
+          schema:
+            $ref: "#/components/schemas/SSOProvider"
+        - name: requestState
+          in: cookie
+          description: Stored authentication state.
+          required: false
+          schema:
+            type: string
+            example: st_xxxxxxxxxx
+        - name: requestNonce
+          in: cookie
+          description: Stored authentication nonce.
+          required: false
+          schema:
+            type: string
+            example: n_xxxxxxxxxx
+        - name: requestRedirectUrl
+          in: cookie
+          description: Stored redirect url.
+          required: false
+          schema:
+            type: string
+            example: https://example.com
+        - name: accessToken
+          in: cookie
+          description: Access token for current user.
+          required: false
+          schema:
+            type: string
+            example: xxx.xxxxxx.xxxxx
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code:
+                  type: string
+                state:
+                  type: string
+              required:
+                - code
+                - state
+      responses:
+        '200':
+          description: SSO account linked successfully.
+          headers:
+            Unset-Cookie|requestState|HttpOnly;Secure:
+              description: "Remove authentication state from secure http only cookie."
+              schema:
+                type: string
+                example: "Set-Cookie state=; HttpOnly; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
+            Unset-Cookie|requestNonce|HttpOnly;Secure:
+              description: "Remove authentication nonce from secure http only cookie."
+              schema:
+                type: string
+                example: "Set-Cookie nonce=; HttpOnly; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
+            Unset-Cookie|requestRedirectUrl|HttpOnly;Secure:
+              description: "Remove redirect url from secure http only cookie."
+              schema:
+                type: string
+                example: "Set-Cookie state=; HttpOnly; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
+        '400':
+          description: Invalid data provided to verify.
+        '401':
+          description: Unauthorized access.
+        '404':
+          description: Authentication provider not found.
+    delete:
+      summary: Unlink SSO account from existing account.
+      tags: 
+        - Authentication
+      description: Unlink SSO account from existing account.
+      parameters:
+        - name: provider
+          in: path
+          description: Authentication provider.
+          required: true
+          schema:
+            $ref: "#/components/schemas/SSOProvider"
+        - name: accessToken
+          in: cookie
+          description: Access token for current user.
+          required: false
+          schema:
+            type: string
+            example: xxx.xxxxxx.xxxxx
+      responses:
+        '200':
+          description: SSO account unlinked successfully.
+        '401':
+          description: Unauthorized access.
+        '404':
+          description: Authentication provider not found.
+        '409':
+          description: Should remain at least one SSO account linked.
   /auth/logout:
     get:
       summary: Revoke authentication token
