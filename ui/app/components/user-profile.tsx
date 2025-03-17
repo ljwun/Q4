@@ -13,8 +13,11 @@ import { LogoutButton } from '@/app/components/context/nav-user-context'
 import { useToast } from '@/hooks/use-toast';
 import createClient from "openapi-fetch";
 import { BACKEND_API_BASE_URL } from '@/app/constants'
-import { paths } from "@/app/openapi";
+import { components, paths, Defined, SSOProvider } from "@/app/openapi";
 import { useUser } from "@/app/components/context/nav-user-context"
+import { LoginMessage, LoginStatus } from '@/app/components/user/login';
+
+type SSOProviderType = Defined<components["schemas"]["SSOProvider"]>
 
 interface UserProfileDropdownProps {
   onClose: () => void
@@ -31,7 +34,7 @@ interface UserData {
 }
 
 export function UserProfileDropdown({ onClose }: UserProfileDropdownProps) {
-  const [userData, setUserData] = useState<UserData>({connectedAccounts: {}} as UserData)
+  const [userData, setUserData] = useState<UserData>({ connectedAccounts: {} } as UserData)
   const [isEditing, setIsEditing] = useState(false)
   const [isVisible, setIsVisible] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
@@ -58,7 +61,7 @@ export function UserProfileDropdown({ onClose }: UserProfileDropdownProps) {
         refreshUserProvider()
         handleClose()
         return
-      }else if (!data || error || response.status !== 200) {
+      } else if (!data || error || response.status !== 200) {
         toast({
           title: "載入用戶資料失敗",
           description: "無法取得用戶資料，請稍後再試。",
@@ -76,13 +79,13 @@ export function UserProfileDropdown({ onClose }: UserProfileDropdownProps) {
           github: data.ssoProviders.GitHub,
           microsoft: data.ssoProviders.Microsoft,
         },
-      }) 
+      })
       setIsLoading(false)
     }
 
     fetchUserData()
     return () => clearTimeout(timer)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state])
 
   const setUsername = (newUsername: string) => {
@@ -105,7 +108,7 @@ export function UserProfileDropdown({ onClose }: UserProfileDropdownProps) {
       refreshUserProvider()
       handleClose()
       return
-    } else if ( response.status == 400) {
+    } else if (response.status == 400) {
       toast({
         title: "更新用戶名稱失敗",
         description: "用戶名稱不符合規範，請重新輸入。",
@@ -118,7 +121,7 @@ export function UserProfileDropdown({ onClose }: UserProfileDropdownProps) {
         variant: "destructive",
       });
       console.error('Error during saving username:', error);
-    }else{
+    } else {
       toast({
         title: "更新用戶名稱成功",
         description: "用戶名稱已更新。",
@@ -127,20 +130,111 @@ export function UserProfileDropdown({ onClose }: UserProfileDropdownProps) {
     refresh()
   }
 
-  const disconnectSsoProvider = async (provider: string) => {
+  const disconnectSsoProvider = async (provider: SSOProviderType) => {
     console.log(`Disconnecting ${provider} account...`)
     setIsLoading(true)
-    // todo: 解除連結 SSO 帳號
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    // 解除連結 SSO 帳號
+    const { response } = await client.DELETE("/auth/sso/{provider}/link", {
+      params: {
+        path: { provider },
+      },
+    })
+    if (response.status == 401) {
+      toast({
+        title: "解除連結失敗",
+        description: "請先登入以繼續。",
+        variant: "destructive",
+      });
+      refreshUserProvider()
+      handleClose()
+      return
+    } else if (response.status == 404) {
+      toast({
+        title: "解除連結失敗",
+        description: "無法解除連結，此SSO類型無法使用。",
+        variant: "destructive",
+      });
+    } else if (response.status == 409) {
+      toast({
+        title: "解除連結失敗",
+        description: "無法解除連結，需要留有至少一個連結的SSO帳號。",
+        variant: "destructive",
+      });
+    } else if (response.status !== 200) {
+      toast({
+        title: "解除連結失敗",
+        description: "無法解除連結，請稍後再試。",
+        variant: "destructive",
+      });
+      console.error('Error during disconnecting SSO provider:', response.status);
+    } else {
+      toast({
+        title: "解除連結成功",
+        description: "帳號連結已解除。",
+      });
+    }
     refresh()
   }
 
-  const connectSsoProvider = async (provider: string) => {
+  const connectSsoProvider = async (provider: SSOProviderType) => {
     console.log(`Connecting ${provider} account...`)
     setIsLoading(true)
-    // todo: 連結 SSO 帳號
-    await new Promise((resolve) => setTimeout(resolve, 100))
-    refresh()
+    // 連結 SSO 帳號
+    const { response } = await client.GET("/auth/sso/{provider}/login", {
+      params: {
+        path: { provider },
+        query: {
+          redirectUrl: new URL(`/sso/${provider}/link`, location.origin).toString(),
+        },
+      },
+    });
+    if (response.status == 404) {
+      toast({
+        title: "連結失敗",
+        description: "目前不支援此SSO提供者。",
+        variant: "destructive",
+      });
+      setIsLoading(false)
+      return
+    }
+    const authUrl = response?.headers.get('Location')
+    if (!authUrl || response.status != 200) {
+      toast({
+        title: "連結失敗",
+        description: "無法取得到SSO登入網頁，請稍後再試。",
+        variant: "destructive",
+      });
+      setIsLoading(false)
+      return
+    }
+    const authWindow = window.open(authUrl, "authWindow");
+    window.addEventListener("message", (event) => {
+      if (event.origin !== location.origin) {
+        return
+      }
+      // 檢查資料是否是LoginMessage類型
+      if (!("status" in event.data)) {
+        return
+      }
+      const message = event.data as LoginMessage
+      switch (message.status) {
+        case LoginStatus.loginSuccess:
+          toast({
+            title: "連結成功",
+            description: "連結成功",
+          });
+          break
+        case LoginStatus.loginFailed:
+          toast({
+            title: "連結失敗",
+            description: message.error || "連結失敗，請稍後再試。",
+            variant: "destructive",
+          });
+          break
+      }
+      refresh()
+      authWindow?.close()
+    })
   }
 
   const handleClose = () => {
@@ -153,9 +247,8 @@ export function UserProfileDropdown({ onClose }: UserProfileDropdownProps) {
     <>
       {/* Backdrop overlay */}
       <div
-        className={`fixed inset-0 bg-black transition-opacity duration-300 ease-in-out z-40 ${
-          isVisible ? "opacity-50 dark:opacity-60" : "opacity-0"
-        }`}
+        className={`fixed inset-0 bg-black transition-opacity duration-300 ease-in-out z-40 ${isVisible ? "opacity-50 dark:opacity-60" : "opacity-0"
+          }`}
         onClick={isLoading ? undefined : handleClose}
       />
 
@@ -167,14 +260,14 @@ export function UserProfileDropdown({ onClose }: UserProfileDropdownProps) {
         `}
       >
         {/* Loading overlay */}
-          {isLoading && (
-            <div className="absolute inset-0 bg-background/80 backdrop-blur-sm z-10 flex flex-col items-center justify-center rounded-lg">
-              <div className="animate-spin mb-4">
-                <FiLoader className="h-10 w-10 text-primary" />
-              </div>
-              <p className="text-center text-muted-foreground">載入用戶資料中...</p>
+        {isLoading && (
+          <div className="absolute inset-0 bg-background/80 backdrop-blur-sm z-10 flex flex-col items-center justify-center rounded-lg">
+            <div className="animate-spin mb-4">
+              <FiLoader className="h-10 w-10 text-primary" />
             </div>
-          )}
+            <p className="text-center text-muted-foreground">載入用戶資料中...</p>
+          </div>
+        )}
         <CardHeader className="relative pb-2">
           <Button variant="ghost" size="icon" className="absolute right-2 top-2" onClick={handleClose} disabled={isLoading}>
             <FiX className="h-4 w-4" />
@@ -227,7 +320,7 @@ export function UserProfileDropdown({ onClose }: UserProfileDropdownProps) {
                 <Button
                   variant={userData.connectedAccounts.internal ? "destructive" : "outline"}
                   size="sm"
-                  onClick={userData.connectedAccounts.internal ? ()=>disconnectSsoProvider("internal") : ()=>connectSsoProvider("internal")}
+                  onClick={userData.connectedAccounts.internal ? () => disconnectSsoProvider(SSOProvider.Internal) : () => connectSsoProvider(SSOProvider.Internal)}
                 >
                   {userData.connectedAccounts.internal ? "解除連結" : "連結"}
                 </Button>
@@ -241,7 +334,7 @@ export function UserProfileDropdown({ onClose }: UserProfileDropdownProps) {
                 <Button
                   variant={userData.connectedAccounts.google ? "destructive" : "outline"}
                   size="sm"
-                  disabled
+                  onClick={userData.connectedAccounts.google ? () => disconnectSsoProvider(SSOProvider.Google) : () => connectSsoProvider(SSOProvider.Google)}
                 >
                   {userData.connectedAccounts.google ? "解除連結" : "連結"}
                 </Button>
@@ -255,7 +348,7 @@ export function UserProfileDropdown({ onClose }: UserProfileDropdownProps) {
                 <Button
                   variant={userData.connectedAccounts.github ? "destructive" : "outline"}
                   size="sm"
-                  disabled
+                  onClick={userData.connectedAccounts.github ? () => disconnectSsoProvider(SSOProvider.GitHub) : () => connectSsoProvider(SSOProvider.GitHub)}
                 >
                   {userData.connectedAccounts.github ? "解除連結" : "連結"}
                 </Button>
@@ -269,7 +362,7 @@ export function UserProfileDropdown({ onClose }: UserProfileDropdownProps) {
                 <Button
                   variant={userData.connectedAccounts.microsoft ? "destructive" : "outline"}
                   size="sm"
-                  disabled
+                  onClick={userData.connectedAccounts.microsoft ? () => disconnectSsoProvider(SSOProvider.Microsoft) : () => connectSsoProvider(SSOProvider.Microsoft)}
                 >
                   {userData.connectedAccounts.microsoft ? "解除連結" : "連結"}
                 </Button>
