@@ -1,6 +1,6 @@
 {
   "name": "q4",
-  "version": "v0.5.0",
+  "version": "v0.6.0",
   "private": true,
   "workspaces": [
     "ui"
