@@ -56,21 +56,38 @@ api:
       key: ""
   # oidc設定，必填
   oidc:
-    issuerUrl:
-      value: ""
-      configMapName: ""
-      secretName: ""
-      key: ""
-    clientId:
-      value: ""
-      configMapName: ""
-      secretName: ""
-      key: ""
-    clientSecret:
-      value: ""
-      configMapName: ""
-      secretName: ""
-      key: ""
+    Internal:
+      issuerUrl:
+        value: ""
+        configMapName: ""
+        secretName: ""
+        key: ""
+      clientId:
+        value: ""
+        configMapName: ""
+        secretName: ""
+        key: ""
+      clientSecret:
+        value: ""
+        configMapName: ""
+        secretName: ""
+        key: ""
+    Google:
+      issuerUrl:
+        value: ""
+        configMapName: ""
+        secretName: ""
+        key: ""
+      clientId:
+        value: ""
+        configMapName: ""
+        secretName: ""
+        key: ""
+      clientSecret:
+        value: ""
+        configMapName: ""
+        secretName: ""
+        key: ""
   # S3 設定，必填
   s3:
     endpoint:

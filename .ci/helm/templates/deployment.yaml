@@ -37,9 +37,13 @@ spec:
             {{- include "utils.envValue" (dict "name" "Q4_AUTH_EXPIRE_DURATION" "data" .Values.api.auth.expireDuration "required" true) | nindent 12 }}
 
             # OIDC settings
-            {{- include "utils.envValue" (dict "name" "Q4_OIDC_ISSUER_URL" "data" .Values.api.oidc.issuerUrl "required" true) | nindent 12 }}
-            {{- include "utils.envValue" (dict "name" "Q4_OIDC_CLIENT_ID" "data" .Values.api.oidc.clientId "required" true) | nindent 12 }}
-            {{- include "utils.envValue" (dict "name" "Q4_OIDC_CLIENT_SECRET" "data" .Values.api.oidc.clientSecret "required" true) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_OIDC_INTERNAL_ISSUER_URL" "data" .Values.api.oidc.Internal.issuerUrl "required" true) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_OIDC_INTERNAL_CLIENT_ID" "data" .Values.api.oidc.Internal.clientId "required" true) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_OIDC_INTERNAL_CLIENT_SECRET" "data" .Values.api.oidc.Internal.clientSecret "required" true) | nindent 12 }}
+
+            {{- include "utils.envValue" (dict "name" "Q4_OIDC_GOOGLE_ISSUER_URL" "data" .Values.api.oidc.Google.issuerUrl "required" true) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_OIDC_GOOGLE_CLIENT_ID" "data" .Values.api.oidc.Google.clientId "required" true) | nindent 12 }}
+            {{- include "utils.envValue" (dict "name" "Q4_OIDC_GOOGLE_CLIENT_SECRET" "data" .Values.api.oidc.Google.clientSecret "required" true) | nindent 12 }}
 
             # S3 settings
             {{- include "utils.envValue" (dict "name" "Q4_S3_ENDPOINT" "data" .Values.api.s3.endpoint "required" true) | nindent 12 }}
