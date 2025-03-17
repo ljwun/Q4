@@ -4,5 +4,14 @@
   "private": true,
   "workspaces": [
     "ui"
-  ]
+  ],
+  "scripts": {
+    "gen:ui": "npm -w ui run gen-api-code",
+    "gen:api": "go generate ./tools/oapi-codegen",
+    "gen:all": "npm run gen:api && npm run gen:ui",
+    "migrate:dev": "atlas schema apply -c file://models/atlas.hcl --env gorm  --auto-approve",
+    "migrate:prod": "atlas migrate apply -c file://models/atlas.hcl --env gorm",
+    "version": "./tools/update-version-number.sh $1 -ui",
+    "build:ci": "./tools/build-and-push.sh $1"
+  }
 }
