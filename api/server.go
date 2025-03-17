@@ -753,6 +753,111 @@ func (impl *ServerImpl) GetAuthLogout(ctx context.Context, request openapi.GetAu
 	return openapi.GetAuthLogout200Response{}, nil
 }
 
+// Unlink SSO account from existing account.
+// (DELETE /auth/sso/{provider}/link)
+func (impl *ServerImpl) DeleteAuthSsoProviderLink(ctx context.Context, request openapi.DeleteAuthSsoProviderLinkRequestObject) (openapi.DeleteAuthSsoProviderLinkResponseObject, error) {
+	const op = "DeleteAuthSsoProviderLink"
+	// 檢查provider
+	_, ok := impl.oidcProviders[request.Provider]
+	if !ok {
+		return openapi.DeleteAuthSsoProviderLink404Response{}, nil
+	}
+	// 檢查使用者是否有權限解除SSO帳號關聯
+	//  - 檢查是否有提供access token
+	if request.Params.AccessToken == nil {
+		return openapi.DeleteAuthSsoProviderLink401Response{}, nil
+	}
+	//  - 解析並驗證access token
+	token, err := openapi.ParseAndValidateJWT(*request.Params.AccessToken, impl.config.Auth.PrivateKey)
+	if err != nil {
+		slog.Error("Fail to parse and validate JWT", slog.String("op", op), slog.Any("error", err))
+		return openapi.DeleteAuthSsoProviderLink401Response{}, nil
+	}
+	// 取得使用者現有的SSO綁定
+	user := models.User{ID: uuid.MustParse(token.Subject)}
+	if result := impl.db.Preload("Identities").Preload("Identities.SsoProvider").First(&user); result.Error != nil {
+		return nil, fmt.Errorf("[%s] Fail to find user, err=%w", op, result.Error)
+	}
+	// 檢查是否有要解除的SSO綁定
+	var targetIdentity *models.UserIdentity
+	for _, identity := range user.Identities {
+		if identity.SsoProvider.Name == request.Provider {
+			targetIdentity = &identity
+			break
+		}
+	}
+	if targetIdentity == nil {
+		return openapi.DeleteAuthSsoProviderLink200Response{}, nil
+	}
+	// 檢查是否有其他SSO綁定
+	if len(user.Identities) == 1 {
+		return openapi.DeleteAuthSsoProviderLink409Response{}, nil
+	}
+	// 刪除SSO綁定
+	if result := impl.db.Delete(targetIdentity); result.Error != nil {
+		return nil, fmt.Errorf("[%s] Fail to delete user identity, err=%w", op, result.Error)
+	}
+	return openapi.DeleteAuthSsoProviderLink200Response{}, nil
+}
+
+// Link SSO account to existing account.
+// (POST /auth/sso/{provider}/link)
+func (impl *ServerImpl) PostAuthSsoProviderLink(ctx context.Context, request openapi.PostAuthSsoProviderLinkRequestObject) (openapi.PostAuthSsoProviderLinkResponseObject, error) {
+	const op = "PostAuthSsoProviderLink"
+	// 取得provider
+	provider, ok := impl.oidcProviders[request.Provider]
+	if !ok {
+		return openapi.PostAuthSsoProviderLink404Response{}, nil
+	}
+	// 檢查使用者是否有權限連結SSO帳號
+	//  - 檢查是否有提供access token
+	if request.Params.AccessToken == nil {
+		return openapi.PostAuthSsoProviderLink401Response{}, nil
+	}
+	//  - 解析並驗證access token
+	token, err := openapi.ParseAndValidateJWT(*request.Params.AccessToken, impl.config.Auth.PrivateKey)
+	if err != nil {
+		slog.Error("Fail to parse and validate JWT", slog.String("op", op), slog.Any("error", err))
+		return openapi.PostAuthSsoProviderLink401Response{}, nil
+	}
+	// 驗證 callback 的參數和login時儲存在 secure cookie 的參數是否相同
+	var requestState, requestNonce string
+	if request.Params.RequestState != nil {
+		requestState = *request.Params.RequestState
+	}
+	if request.Params.RequestNonce != nil {
+		requestNonce = *request.Params.RequestNonce
+	}
+	verifier := provider.NewExchangeVerifier(requestState, requestNonce)
+	// 向驗證伺服器交換token
+	var requestRedirectUrl string
+	if request.Params.RequestRedirectUrl != nil {
+		requestRedirectUrl = *request.Params.RequestRedirectUrl
+	}
+	ssoToken, err := provider.Exchange(ctx, verifier, request.Body.Code, request.Body.State, requestRedirectUrl)
+	if errors.Is(err, oidc.ErrStateMismatch) || errors.Is(err, oidc.ErrNonceMismatch) {
+		return openapi.PostAuthSsoProviderLink400Response{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("[%s] Fail to exchange token, err=%w", op, err)
+	}
+	// 新增SSO關聯
+	ssoProvider := models.SsoProvider{Name: request.Provider}
+	if result := impl.db.Where(&ssoProvider).First(&ssoProvider); result.Error != nil {
+		return nil, fmt.Errorf("[%s] Fail to find sso provider %s, err=%w", op, request.Provider, result.Error)
+	}
+	userIdentity := models.UserIdentity{
+		SsoProviderID: ssoProvider.ID,
+		UserID:        uuid.MustParse(token.Subject),
+		Identity:      ssoToken.IDToken.Sub,
+	}
+	// NOTE: 由於有 idx_user_identity_sso_provider_id_user_id 這個約束，所以這邊不需要檢查已有的 identity
+	if result := impl.db.Create(&userIdentity); result.Error != nil {
+		return nil, fmt.Errorf("[%s] Fail to create user identity, err=%w", op, result.Error)
+	}
+	return openapi.PostAuthSsoProviderLink200Response{}, nil
+}
+
 // Get user information
 // (GET /user/info)
 func (impl *ServerImpl) GetUserInfo(ctx context.Context, request openapi.GetUserInfoRequestObject) (openapi.GetUserInfoResponseObject, error) {
