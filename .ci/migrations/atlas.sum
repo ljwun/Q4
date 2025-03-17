@@ -1,6 +1,8 @@
-h1:wuAVYmHBtKrhF/t/aNrIU2fX2fOIj5SsifXzAtB1zcA=
+h1:KB94zUaA2uUxHPD3bWl6Odf+XG5WAfriDw0Vi2EiBrE=
 20250302091743_init.sql h1:xEs3c7gI0bO9v4E6//EPszTYVu+5gVyqc4KIcdKVdDA=
 20250309141752_add_image.sql h1:v2NuyIKvdRkxlJLQ2XkD99G+o6DWBT2o7yxAdCvIx/Y=
 20250315091512_add_sso.sql h1:rvUCBE1YwqX8BpTXouFDgkrE8yYrVsAw4X+A1VmPshc=
 20250315091522_insert_default_sso_provider.sql h1:vHsP2Y/ZWYWreQhl6yIpFrnP5uaB0tWwe1YNERPfQdY=
 20250315172031_add_user_relation_to_identity.sql h1:yLLW+U3+rSBumYRy1MBpYHFUdMY150etT6tqgtcZlPY=
+20250316174142_add_idx_user_identity_sso_provider_id_user_id_constraint.sql h1:HhtmxMelUEyXIqlhI3K/wp+JJyXm9oOVkdIZj/lrbQ4=
+20250316184804_fix_issue_with_constraint_and_soft_deleted.sql h1:pVfOTja6Pt2tVrs+usAoHAmpfkLk/aJlSK+knWYh4PQ=

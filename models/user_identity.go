@@ -11,9 +11,9 @@ type UserIdentity struct {
 	gorm.Model
 
 	ID            uuid.UUID `gorm:"type:uuid;default:public.uuid_generate_v7();primaryKey;<-:false"`
-	SsoProviderID uuid.UUID `gorm:"type:uuid;uniqueIndex:idx_user_identity_sso_provider_id_identity;not null;<-:create"`
-	UserID        uuid.UUID `gorm:"type:uuid;not null;<-:create"`
-	Identity      string    `gorm:"type:text;uniqueIndex:idx_user_identity_sso_provider_id_identity;not null;<-:create"`
+	SsoProviderID uuid.UUID `gorm:"type:uuid;uniqueIndex:idx_user_identity_sso_provider_id_user_id,where:deleted_at IS NULL;uniqueIndex:idx_user_identity_sso_provider_id_identity,where:deleted_at IS NULL;not null;<-:create"`
+	UserID        uuid.UUID `gorm:"type:uuid;uniqueIndex:idx_user_identity_sso_provider_id_user_id,where:deleted_at IS NULL;not null;<-:create"`
+	Identity      string    `gorm:"type:text;uniqueIndex:idx_user_identity_sso_provider_id_identity,where:deleted_at IS NULL;not null;<-:create"`
 
 	SsoProvider *SsoProvider `gorm:"foreignKey:SsoProviderID"`
 	User        *User        `gorm:"foreignKey:UserID"`
