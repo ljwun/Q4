@@ -1,6 +1,8 @@
 # 包含機密的啟動參數
-**/.env
+**/*.env
+.vscode/
+.ci/k8s/
 
 # 依賴
-node_modules/
-
+**/node_modules/
+**/.next/
