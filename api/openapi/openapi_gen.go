@@ -180,6 +180,33 @@ type GetAuthSsoProviderCallbackParams struct {
 	RequestRedirectUrl *string `form:"requestRedirectUrl,omitempty" json:"requestRedirectUrl,omitempty"`
 }
 
+// DeleteAuthSsoProviderLinkParams defines parameters for DeleteAuthSsoProviderLink.
+type DeleteAuthSsoProviderLinkParams struct {
+	// AccessToken Access token for current user.
+	AccessToken *string `form:"accessToken,omitempty" json:"accessToken,omitempty"`
+}
+
+// PostAuthSsoProviderLinkJSONBody defines parameters for PostAuthSsoProviderLink.
+type PostAuthSsoProviderLinkJSONBody struct {
+	Code  string `json:"code"`
+	State string `json:"state"`
+}
+
+// PostAuthSsoProviderLinkParams defines parameters for PostAuthSsoProviderLink.
+type PostAuthSsoProviderLinkParams struct {
+	// RequestState Stored authentication state.
+	RequestState *string `form:"requestState,omitempty" json:"requestState,omitempty"`
+
+	// RequestNonce Stored authentication nonce.
+	RequestNonce *string `form:"requestNonce,omitempty" json:"requestNonce,omitempty"`
+
+	// RequestRedirectUrl Stored redirect url.
+	RequestRedirectUrl *string `form:"requestRedirectUrl,omitempty" json:"requestRedirectUrl,omitempty"`
+
+	// AccessToken Access token for current user.
+	AccessToken *string `form:"accessToken,omitempty" json:"accessToken,omitempty"`
+}
+
 // GetAuthSsoProviderLoginParams defines parameters for GetAuthSsoProviderLogin.
 type GetAuthSsoProviderLoginParams struct {
 	// RedirectUrl Url to back after finishing authorization.
@@ -215,6 +242,9 @@ type PostAuctionItemJSONRequestBody PostAuctionItemJSONBody
 // PostAuctionItemItemIDBidsJSONRequestBody defines body for PostAuctionItemItemIDBids for application/json ContentType.
 type PostAuctionItemItemIDBidsJSONRequestBody PostAuctionItemItemIDBidsJSONBody
 
+// PostAuthSsoProviderLinkJSONRequestBody defines body for PostAuthSsoProviderLink for application/json ContentType.
+type PostAuthSsoProviderLinkJSONRequestBody PostAuthSsoProviderLinkJSONBody
+
 // PatchUserInfoJSONRequestBody defines body for PatchUserInfo for application/json ContentType.
 type PatchUserInfoJSONRequestBody PatchUserInfoJSONBody
 
@@ -241,6 +271,12 @@ type ServerInterface interface {
 	// Exchange authorization code
 	// (GET /auth/sso/{provider}/callback)
 	GetAuthSsoProviderCallback(c *gin.Context, provider SSOProvider, params GetAuthSsoProviderCallbackParams)
+	// Unlink SSO account from existing account.
+	// (DELETE /auth/sso/{provider}/link)
+	DeleteAuthSsoProviderLink(c *gin.Context, provider SSOProvider, params DeleteAuthSsoProviderLinkParams)
+	// Link SSO account to existing account.
+	// (POST /auth/sso/{provider}/link)
+	PostAuthSsoProviderLink(c *gin.Context, provider SSOProvider, params PostAuthSsoProviderLinkParams)
 	// Obtain authentication url
 	// (GET /auth/sso/{provider}/login)
 	GetAuthSsoProviderLogin(c *gin.Context, provider SSOProvider, params GetAuthSsoProviderLoginParams)
@@ -629,6 +665,135 @@ func (siw *ServerInterfaceWrapper) GetAuthSsoProviderCallback(c *gin.Context) {
 	siw.Handler.GetAuthSsoProviderCallback(c, provider, params)
 }
 
+// DeleteAuthSsoProviderLink operation middleware
+func (siw *ServerInterfaceWrapper) DeleteAuthSsoProviderLink(c *gin.Context) {
+
+	var err error
+
+	// ------------- Path parameter "provider" -------------
+	var provider SSOProvider
+
+	err = runtime.BindStyledParameterWithOptions("simple", "provider", c.Param("provider"), &provider, runtime.BindStyledParameterOptions{Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter provider: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteAuthSsoProviderLinkParams
+
+	{
+		var cookie string
+
+		if cookie, err = c.Cookie("accessToken"); err == nil {
+			var value string
+			err = runtime.BindStyledParameterWithOptions("simple", "accessToken", cookie, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+			if err != nil {
+				siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter accessToken: %w", err), http.StatusBadRequest)
+				return
+			}
+			params.AccessToken = &value
+
+		}
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteAuthSsoProviderLink(c, provider, params)
+}
+
+// PostAuthSsoProviderLink operation middleware
+func (siw *ServerInterfaceWrapper) PostAuthSsoProviderLink(c *gin.Context) {
+
+	var err error
+
+	// ------------- Path parameter "provider" -------------
+	var provider SSOProvider
+
+	err = runtime.BindStyledParameterWithOptions("simple", "provider", c.Param("provider"), &provider, runtime.BindStyledParameterOptions{Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter provider: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAuthSsoProviderLinkParams
+
+	{
+		var cookie string
+
+		if cookie, err = c.Cookie("requestState"); err == nil {
+			var value string
+			err = runtime.BindStyledParameterWithOptions("simple", "requestState", cookie, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+			if err != nil {
+				siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter requestState: %w", err), http.StatusBadRequest)
+				return
+			}
+			params.RequestState = &value
+
+		}
+	}
+
+	{
+		var cookie string
+
+		if cookie, err = c.Cookie("requestNonce"); err == nil {
+			var value string
+			err = runtime.BindStyledParameterWithOptions("simple", "requestNonce", cookie, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+			if err != nil {
+				siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter requestNonce: %w", err), http.StatusBadRequest)
+				return
+			}
+			params.RequestNonce = &value
+
+		}
+	}
+
+	{
+		var cookie string
+
+		if cookie, err = c.Cookie("requestRedirectUrl"); err == nil {
+			var value string
+			err = runtime.BindStyledParameterWithOptions("simple", "requestRedirectUrl", cookie, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+			if err != nil {
+				siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter requestRedirectUrl: %w", err), http.StatusBadRequest)
+				return
+			}
+			params.RequestRedirectUrl = &value
+
+		}
+	}
+
+	{
+		var cookie string
+
+		if cookie, err = c.Cookie("accessToken"); err == nil {
+			var value string
+			err = runtime.BindStyledParameterWithOptions("simple", "accessToken", cookie, &value, runtime.BindStyledParameterOptions{Explode: true, Required: false})
+			if err != nil {
+				siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter accessToken: %w", err), http.StatusBadRequest)
+				return
+			}
+			params.AccessToken = &value
+
+		}
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PostAuthSsoProviderLink(c, provider, params)
+}
+
 // GetAuthSsoProviderLogin operation middleware
 func (siw *ServerInterfaceWrapper) GetAuthSsoProviderLogin(c *gin.Context) {
 
@@ -804,6 +969,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/auction/items", wrapper.GetAuctionItems)
 	router.GET(options.BaseURL+"/auth/logout", wrapper.GetAuthLogout)
 	router.GET(options.BaseURL+"/auth/sso/:provider/callback", wrapper.GetAuthSsoProviderCallback)
+	router.DELETE(options.BaseURL+"/auth/sso/:provider/link", wrapper.DeleteAuthSsoProviderLink)
+	router.POST(options.BaseURL+"/auth/sso/:provider/link", wrapper.PostAuthSsoProviderLink)
 	router.GET(options.BaseURL+"/auth/sso/:provider/login", wrapper.GetAuthSsoProviderLogin)
 	router.POST(options.BaseURL+"/image", wrapper.PostImage)
 	router.GET(options.BaseURL+"/user/info", wrapper.GetUserInfo)
@@ -1175,6 +1342,126 @@ func (response GetAuthSsoProviderCallback404Response) VisitGetAuthSsoProviderCal
 	return nil
 }
 
+type DeleteAuthSsoProviderLinkRequestObject struct {
+	Provider SSOProvider `json:"provider"`
+	Params   DeleteAuthSsoProviderLinkParams
+}
+
+type DeleteAuthSsoProviderLinkResponseObject interface {
+	VisitDeleteAuthSsoProviderLinkResponse(w http.ResponseWriter) error
+}
+
+type DeleteAuthSsoProviderLink200Response struct {
+}
+
+func (response DeleteAuthSsoProviderLink200Response) VisitDeleteAuthSsoProviderLinkResponse(w http.ResponseWriter) error {
+	w.WriteHeader(200)
+	return nil
+}
+
+type DeleteAuthSsoProviderLink401Response struct {
+}
+
+func (response DeleteAuthSsoProviderLink401Response) VisitDeleteAuthSsoProviderLinkResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type DeleteAuthSsoProviderLink404Response struct {
+}
+
+func (response DeleteAuthSsoProviderLink404Response) VisitDeleteAuthSsoProviderLinkResponse(w http.ResponseWriter) error {
+	w.WriteHeader(404)
+	return nil
+}
+
+type DeleteAuthSsoProviderLink409Response struct {
+}
+
+func (response DeleteAuthSsoProviderLink409Response) VisitDeleteAuthSsoProviderLinkResponse(w http.ResponseWriter) error {
+	w.WriteHeader(409)
+	return nil
+}
+
+type PostAuthSsoProviderLinkRequestObject struct {
+	Provider SSOProvider `json:"provider"`
+	Params   PostAuthSsoProviderLinkParams
+	Body     *PostAuthSsoProviderLinkJSONRequestBody
+}
+
+type PostAuthSsoProviderLinkResponseObject interface {
+	VisitPostAuthSsoProviderLinkResponse(w http.ResponseWriter) error
+}
+
+type PostAuthSsoProviderLink200ResponseHeaders struct {
+	UnsetCookieRequestNonceHttpOnlySecure       string
+	UnsetCookieRequestRedirectUrlHttpOnlySecure string
+	UnsetCookieRequestStateHttpOnlySecure       string
+}
+
+type PostAuthSsoProviderLink200Response struct {
+	Headers PostAuthSsoProviderLink200ResponseHeaders
+}
+
+func (response PostAuthSsoProviderLink200Response) VisitPostAuthSsoProviderLinkResponse(w http.ResponseWriter) error {
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "requestNonce",
+		Value:    "", // 清空 cookie
+		Secure:   true,
+		HttpOnly: true,
+		Path:     "/",
+		SameSite: http.SameSiteStrictMode,
+		Expires:  time.Unix(0, 0),
+	})
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "requestRedirectUrl",
+		Value:    "", // 清空 cookie
+		Secure:   true,
+		HttpOnly: true,
+		Path:     "/",
+		SameSite: http.SameSiteStrictMode,
+		Expires:  time.Unix(0, 0),
+	})
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "requestState",
+		Value:    "", // 清空 cookie
+		Secure:   true,
+		HttpOnly: true,
+		Path:     "/",
+		SameSite: http.SameSiteStrictMode,
+		Expires:  time.Unix(0, 0),
+	})
+	w.WriteHeader(200)
+	return nil
+}
+
+type PostAuthSsoProviderLink400Response struct {
+}
+
+func (response PostAuthSsoProviderLink400Response) VisitPostAuthSsoProviderLinkResponse(w http.ResponseWriter) error {
+	w.WriteHeader(400)
+	return nil
+}
+
+type PostAuthSsoProviderLink401Response struct {
+}
+
+func (response PostAuthSsoProviderLink401Response) VisitPostAuthSsoProviderLinkResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type PostAuthSsoProviderLink404Response struct {
+}
+
+func (response PostAuthSsoProviderLink404Response) VisitPostAuthSsoProviderLinkResponse(w http.ResponseWriter) error {
+	w.WriteHeader(404)
+	return nil
+}
+
 type GetAuthSsoProviderLoginRequestObject struct {
 	Provider SSOProvider `json:"provider"`
 	Params   GetAuthSsoProviderLoginParams
@@ -1372,6 +1659,12 @@ type StrictServerInterface interface {
 	// Exchange authorization code
 	// (GET /auth/sso/{provider}/callback)
 	GetAuthSsoProviderCallback(ctx context.Context, request GetAuthSsoProviderCallbackRequestObject) (GetAuthSsoProviderCallbackResponseObject, error)
+	// Unlink SSO account from existing account.
+	// (DELETE /auth/sso/{provider}/link)
+	DeleteAuthSsoProviderLink(ctx context.Context, request DeleteAuthSsoProviderLinkRequestObject) (DeleteAuthSsoProviderLinkResponseObject, error)
+	// Link SSO account to existing account.
+	// (POST /auth/sso/{provider}/link)
+	PostAuthSsoProviderLink(ctx context.Context, request PostAuthSsoProviderLinkRequestObject) (PostAuthSsoProviderLinkResponseObject, error)
 	// Obtain authentication url
 	// (GET /auth/sso/{provider}/login)
 	GetAuthSsoProviderLogin(ctx context.Context, request GetAuthSsoProviderLoginRequestObject) (GetAuthSsoProviderLoginResponseObject, error)
@@ -1605,6 +1898,70 @@ func (sh *strictHandler) GetAuthSsoProviderCallback(ctx *gin.Context, provider S
 	}
 }
 
+// DeleteAuthSsoProviderLink operation middleware
+func (sh *strictHandler) DeleteAuthSsoProviderLink(ctx *gin.Context, provider SSOProvider, params DeleteAuthSsoProviderLinkParams) {
+	var request DeleteAuthSsoProviderLinkRequestObject
+
+	request.Provider = provider
+	request.Params = params
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteAuthSsoProviderLink(ctx, request.(DeleteAuthSsoProviderLinkRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteAuthSsoProviderLink")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		ctx.Error(err)
+		ctx.Status(http.StatusInternalServerError)
+	} else if validResponse, ok := response.(DeleteAuthSsoProviderLinkResponseObject); ok {
+		if err := validResponse.VisitDeleteAuthSsoProviderLinkResponse(ctx.Writer); err != nil {
+			ctx.Error(err)
+		}
+	} else if response != nil {
+		ctx.Error(fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PostAuthSsoProviderLink operation middleware
+func (sh *strictHandler) PostAuthSsoProviderLink(ctx *gin.Context, provider SSOProvider, params PostAuthSsoProviderLinkParams) {
+	var request PostAuthSsoProviderLinkRequestObject
+
+	request.Provider = provider
+	request.Params = params
+
+	var body PostAuthSsoProviderLinkJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		ctx.Status(http.StatusBadRequest)
+		ctx.Error(err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.PostAuthSsoProviderLink(ctx, request.(PostAuthSsoProviderLinkRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PostAuthSsoProviderLink")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		ctx.Error(err)
+		ctx.Status(http.StatusInternalServerError)
+	} else if validResponse, ok := response.(PostAuthSsoProviderLinkResponseObject); ok {
+		if err := validResponse.VisitPostAuthSsoProviderLinkResponse(ctx.Writer); err != nil {
+			ctx.Error(err)
+		}
+	} else if response != nil {
+		ctx.Error(fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetAuthSsoProviderLogin operation middleware
 func (sh *strictHandler) GetAuthSsoProviderLogin(ctx *gin.Context, provider SSOProvider, params GetAuthSsoProviderLoginParams) {
 	var request GetAuthSsoProviderLoginRequestObject
@@ -1727,48 +2084,52 @@ func (sh *strictHandler) PatchUserInfo(ctx *gin.Context, params PatchUserInfoPar
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
+	"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",
+	"w22qnSJEAAA=",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

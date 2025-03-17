@@ -548,6 +548,137 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/sso/{provider}/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Link SSO account to existing account.
+         * @description Link SSO account to existing account. It work like callback but without cookie and redirectUrl response.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Authentication provider. */
+                    provider: components["schemas"]["SSOProvider"];
+                };
+                cookie?: {
+                    /** @description Stored authentication state. */
+                    requestState?: string;
+                    /** @description Stored authentication nonce. */
+                    requestNonce?: string;
+                    /** @description Stored redirect url. */
+                    requestRedirectUrl?: string;
+                    /** @description Access token for current user. */
+                    accessToken?: string;
+                };
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        code: string;
+                        state: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description SSO account linked successfully. */
+                200: {
+                    headers: {
+                        /** @description Remove authentication state from secure http only cookie. */
+                        "Unset-Cookie|requestState|HttpOnly;Secure"?: string;
+                        /** @description Remove authentication nonce from secure http only cookie. */
+                        "Unset-Cookie|requestNonce|HttpOnly;Secure"?: string;
+                        /** @description Remove redirect url from secure http only cookie. */
+                        "Unset-Cookie|requestRedirectUrl|HttpOnly;Secure"?: string;
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Invalid data provided to verify. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthorized access. */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Authentication provider not found. */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        /**
+         * Unlink SSO account from existing account.
+         * @description Unlink SSO account from existing account.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Authentication provider. */
+                    provider: components["schemas"]["SSOProvider"];
+                };
+                cookie?: {
+                    /** @description Access token for current user. */
+                    accessToken?: string;
+                };
+            };
+            requestBody?: never;
+            responses: {
+                /** @description SSO account unlinked successfully. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthorized access. */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Authentication provider not found. */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Should remain at least one SSO account linked. */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/logout": {
         parameters: {
             query?: never;
