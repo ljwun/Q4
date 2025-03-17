@@ -644,13 +644,13 @@ func (impl *ServerImpl) GetAuctionItems(ctx context.Context, request openapi.Get
 }
 
 // Exchange authorization code
-// (GET /auth/sso/{provider}/callback)
-func (impl *ServerImpl) GetAuthSsoProviderCallback(ctx context.Context, request openapi.GetAuthSsoProviderCallbackRequestObject) (openapi.GetAuthSsoProviderCallbackResponseObject, error) {
-	const op = "GetAuthCallback"
+// (POST /auth/sso/{provider}/callback)
+func (impl *ServerImpl) PostAuthSsoProviderCallback(ctx context.Context, request openapi.PostAuthSsoProviderCallbackRequestObject) (openapi.PostAuthSsoProviderCallbackResponseObject, error) {
+	const op = "PostAuthSsoProviderCallback"
 	// 取得provider
 	provider, ok := impl.oidcProviders[request.Provider]
 	if !ok {
-		return openapi.GetAuthSsoProviderCallback404Response{}, nil
+		return openapi.PostAuthSsoProviderCallback404Response{}, nil
 	}
 	// 驗證 callback 的參數和login時儲存在 secure cookie 的參數是否相同
 	var requestState, requestNonce string
@@ -666,9 +666,9 @@ func (impl *ServerImpl) GetAuthSsoProviderCallback(ctx context.Context, request 
 	if request.Params.RequestRedirectUrl != nil {
 		requestRedirectUrl = *request.Params.RequestRedirectUrl
 	}
-	token, err := provider.Exchange(ctx, verifier, request.Params.Code, request.Params.State, requestRedirectUrl)
+	token, err := provider.Exchange(ctx, verifier, request.Body.Code, request.Body.State, requestRedirectUrl)
 	if errors.Is(err, oidc.ErrStateMismatch) || errors.Is(err, oidc.ErrNonceMismatch) {
-		return openapi.GetAuthSsoProviderCallback400Response{}, nil
+		return openapi.PostAuthSsoProviderCallback400Response{}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("[%s] Fail to exchange token, err=%w", op, err)
@@ -710,8 +710,8 @@ func (impl *ServerImpl) GetAuthSsoProviderCallback(ctx context.Context, request 
 	if err != nil {
 		return nil, fmt.Errorf("[%s] Fail to sign JWT, err=%w", op, err)
 	}
-	return openapi.GetAuthSsoProviderCallback200Response{
-		Headers: openapi.GetAuthSsoProviderCallback200ResponseHeaders{
+	return openapi.PostAuthSsoProviderCallback200Response{
+		Headers: openapi.PostAuthSsoProviderCallback200ResponseHeaders{
 			SetCookieAccessTokenHttpOnlySecureMaxAge10800: q4TokenString,
 			SetCookieUsernameMaxAge10800:                  base64.StdEncoding.EncodeToString([]byte(userIdentity.User.Username)),
 		},

@@ -486,7 +486,7 @@ paths:
         '404':
           description: Authentication provider not found.
   /auth/sso/{provider}/callback:
-    get:
+    post:
       summary: Exchange authorization code
       tags: 
         - Authentication
@@ -498,18 +498,6 @@ paths:
           required: true
           schema:
             $ref: "#/components/schemas/SSOProvider"
-        - name: code
-          in: query
-          description: Authorization code.
-          required: true
-          schema:
-            type: string
-        - name: state
-          in: query
-          description: Authorization state.
-          required: true
-          schema:
-            type: string
         - name: requestState
           in: cookie
           description: Stored authentication state.
@@ -531,6 +519,20 @@ paths:
           schema:
             type: string
             example: https://example.com
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code:
+                  type: string
+                state:
+                  type: string
+              required:
+                - code
+                - state
       responses:
         '200':
           description: Authentication successfully.

@@ -24,15 +24,15 @@ export default function Callback(props: { params: Promise<{ provider: SSOProvide
                     window.opener.postMessage({status: LoginStatus.loginFailed, error: "缺少必要參數"} as LoginMessage, window.location.origin);
                     return;
                 }
-                const { response } = await client.GET("/auth/sso/{provider}/callback", {
+                const { response } = await client.POST("/auth/sso/{provider}/callback", {
                     params: {
                         path: {
                             provider: params.provider,
                         },
-                        query: {
-                            code: code,
-                            state: state,
-                        },
+                    },
+                    body: {
+                        code: code,
+                        state: state,
                     },
                 });
                 if (response.status == 200) {

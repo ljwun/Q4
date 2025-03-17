@@ -479,18 +479,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        get?: never;
+        put?: never;
         /**
          * Exchange authorization code
          * @description Exchange authorization code to finish authentication flow and redirect to origin page.
          */
-        get: {
+        post: {
             parameters: {
-                query: {
-                    /** @description Authorization code. */
-                    code: string;
-                    /** @description Authorization state. */
-                    state: string;
-                };
+                query?: never;
                 header?: never;
                 path: {
                     /** @description Authentication provider. */
@@ -505,7 +502,14 @@ export interface paths {
                     requestRedirectUrl?: string;
                 };
             };
-            requestBody?: never;
+            requestBody: {
+                content: {
+                    "application/json": {
+                        code: string;
+                        state: string;
+                    };
+                };
+            };
             responses: {
                 /** @description Authentication successfully. */
                 200: {
@@ -540,8 +544,6 @@ export interface paths {
                 };
             };
         };
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;

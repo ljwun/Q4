@@ -162,14 +162,14 @@ type GetAuthLogoutParams struct {
 	Username *string `form:"username,omitempty" json:"username,omitempty"`
 }
 
-// GetAuthSsoProviderCallbackParams defines parameters for GetAuthSsoProviderCallback.
-type GetAuthSsoProviderCallbackParams struct {
-	// Code Authorization code.
-	Code string `form:"code" json:"code"`
+// PostAuthSsoProviderCallbackJSONBody defines parameters for PostAuthSsoProviderCallback.
+type PostAuthSsoProviderCallbackJSONBody struct {
+	Code  string `json:"code"`
+	State string `json:"state"`
+}
 
-	// State Authorization state.
-	State string `form:"state" json:"state"`
-
+// PostAuthSsoProviderCallbackParams defines parameters for PostAuthSsoProviderCallback.
+type PostAuthSsoProviderCallbackParams struct {
 	// RequestState Stored authentication state.
 	RequestState *string `form:"requestState,omitempty" json:"requestState,omitempty"`
 
@@ -242,6 +242,9 @@ type PostAuctionItemJSONRequestBody PostAuctionItemJSONBody
 // PostAuctionItemItemIDBidsJSONRequestBody defines body for PostAuctionItemItemIDBids for application/json ContentType.
 type PostAuctionItemItemIDBidsJSONRequestBody PostAuctionItemItemIDBidsJSONBody
 
+// PostAuthSsoProviderCallbackJSONRequestBody defines body for PostAuthSsoProviderCallback for application/json ContentType.
+type PostAuthSsoProviderCallbackJSONRequestBody PostAuthSsoProviderCallbackJSONBody
+
 // PostAuthSsoProviderLinkJSONRequestBody defines body for PostAuthSsoProviderLink for application/json ContentType.
 type PostAuthSsoProviderLinkJSONRequestBody PostAuthSsoProviderLinkJSONBody
 
@@ -269,8 +272,8 @@ type ServerInterface interface {
 	// (GET /auth/logout)
 	GetAuthLogout(c *gin.Context, params GetAuthLogoutParams)
 	// Exchange authorization code
-	// (GET /auth/sso/{provider}/callback)
-	GetAuthSsoProviderCallback(c *gin.Context, provider SSOProvider, params GetAuthSsoProviderCallbackParams)
+	// (POST /auth/sso/{provider}/callback)
+	PostAuthSsoProviderCallback(c *gin.Context, provider SSOProvider, params PostAuthSsoProviderCallbackParams)
 	// Unlink SSO account from existing account.
 	// (DELETE /auth/sso/{provider}/link)
 	DeleteAuthSsoProviderLink(c *gin.Context, provider SSOProvider, params DeleteAuthSsoProviderLinkParams)
@@ -563,8 +566,8 @@ func (siw *ServerInterfaceWrapper) GetAuthLogout(c *gin.Context) {
 	siw.Handler.GetAuthLogout(c, params)
 }
 
-// GetAuthSsoProviderCallback operation middleware
-func (siw *ServerInterfaceWrapper) GetAuthSsoProviderCallback(c *gin.Context) {
+// PostAuthSsoProviderCallback operation middleware
+func (siw *ServerInterfaceWrapper) PostAuthSsoProviderCallback(c *gin.Context) {
 
 	var err error
 
@@ -578,37 +581,7 @@ func (siw *ServerInterfaceWrapper) GetAuthSsoProviderCallback(c *gin.Context) {
 	}
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params GetAuthSsoProviderCallbackParams
-
-	// ------------- Required query parameter "code" -------------
-
-	if paramValue := c.Query("code"); paramValue != "" {
-
-	} else {
-		siw.ErrorHandler(c, fmt.Errorf("Query argument code is required, but not found"), http.StatusBadRequest)
-		return
-	}
-
-	err = runtime.BindQueryParameter("form", true, true, "code", c.Request.URL.Query(), &params.Code)
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter code: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	// ------------- Required query parameter "state" -------------
-
-	if paramValue := c.Query("state"); paramValue != "" {
-
-	} else {
-		siw.ErrorHandler(c, fmt.Errorf("Query argument state is required, but not found"), http.StatusBadRequest)
-		return
-	}
-
-	err = runtime.BindQueryParameter("form", true, true, "state", c.Request.URL.Query(), &params.State)
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter state: %w", err), http.StatusBadRequest)
-		return
-	}
+	var params PostAuthSsoProviderCallbackParams
 
 	{
 		var cookie string
@@ -662,7 +635,7 @@ func (siw *ServerInterfaceWrapper) GetAuthSsoProviderCallback(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.GetAuthSsoProviderCallback(c, provider, params)
+	siw.Handler.PostAuthSsoProviderCallback(c, provider, params)
 }
 
 // DeleteAuthSsoProviderLink operation middleware
@@ -968,7 +941,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/auction/item/:itemID/events", wrapper.GetAuctionItemItemIDEvents)
 	router.GET(options.BaseURL+"/auction/items", wrapper.GetAuctionItems)
 	router.GET(options.BaseURL+"/auth/logout", wrapper.GetAuthLogout)
-	router.GET(options.BaseURL+"/auth/sso/:provider/callback", wrapper.GetAuthSsoProviderCallback)
+	router.POST(options.BaseURL+"/auth/sso/:provider/callback", wrapper.PostAuthSsoProviderCallback)
 	router.DELETE(options.BaseURL+"/auth/sso/:provider/link", wrapper.DeleteAuthSsoProviderLink)
 	router.POST(options.BaseURL+"/auth/sso/:provider/link", wrapper.PostAuthSsoProviderLink)
 	router.GET(options.BaseURL+"/auth/sso/:provider/login", wrapper.GetAuthSsoProviderLogin)
@@ -1250,16 +1223,17 @@ func (response GetAuthLogout200Response) VisitGetAuthLogoutResponse(w http.Respo
 	return nil
 }
 
-type GetAuthSsoProviderCallbackRequestObject struct {
+type PostAuthSsoProviderCallbackRequestObject struct {
 	Provider SSOProvider `json:"provider"`
-	Params   GetAuthSsoProviderCallbackParams
+	Params   PostAuthSsoProviderCallbackParams
+	Body     *PostAuthSsoProviderCallbackJSONRequestBody
 }
 
-type GetAuthSsoProviderCallbackResponseObject interface {
-	VisitGetAuthSsoProviderCallbackResponse(w http.ResponseWriter) error
+type PostAuthSsoProviderCallbackResponseObject interface {
+	VisitPostAuthSsoProviderCallbackResponse(w http.ResponseWriter) error
 }
 
-type GetAuthSsoProviderCallback200ResponseHeaders struct {
+type PostAuthSsoProviderCallback200ResponseHeaders struct {
 	SetCookieAccessTokenHttpOnlySecureMaxAge10800 string
 	SetCookieUsernameMaxAge10800                  string
 	UnsetCookieRequestNonceHttpOnlySecure         string
@@ -1267,11 +1241,11 @@ type GetAuthSsoProviderCallback200ResponseHeaders struct {
 	UnsetCookieRequestStateHttpOnlySecure         string
 }
 
-type GetAuthSsoProviderCallback200Response struct {
-	Headers GetAuthSsoProviderCallback200ResponseHeaders
+type PostAuthSsoProviderCallback200Response struct {
+	Headers PostAuthSsoProviderCallback200ResponseHeaders
 }
 
-func (response GetAuthSsoProviderCallback200Response) VisitGetAuthSsoProviderCallbackResponse(w http.ResponseWriter) error {
+func (response PostAuthSsoProviderCallback200Response) VisitPostAuthSsoProviderCallbackResponse(w http.ResponseWriter) error {
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     "accessToken",
@@ -1326,18 +1300,18 @@ func (response GetAuthSsoProviderCallback200Response) VisitGetAuthSsoProviderCal
 	return nil
 }
 
-type GetAuthSsoProviderCallback400Response struct {
+type PostAuthSsoProviderCallback400Response struct {
 }
 
-func (response GetAuthSsoProviderCallback400Response) VisitGetAuthSsoProviderCallbackResponse(w http.ResponseWriter) error {
+func (response PostAuthSsoProviderCallback400Response) VisitPostAuthSsoProviderCallbackResponse(w http.ResponseWriter) error {
 	w.WriteHeader(400)
 	return nil
 }
 
-type GetAuthSsoProviderCallback404Response struct {
+type PostAuthSsoProviderCallback404Response struct {
 }
 
-func (response GetAuthSsoProviderCallback404Response) VisitGetAuthSsoProviderCallbackResponse(w http.ResponseWriter) error {
+func (response PostAuthSsoProviderCallback404Response) VisitPostAuthSsoProviderCallbackResponse(w http.ResponseWriter) error {
 	w.WriteHeader(404)
 	return nil
 }
@@ -1657,8 +1631,8 @@ type StrictServerInterface interface {
 	// (GET /auth/logout)
 	GetAuthLogout(ctx context.Context, request GetAuthLogoutRequestObject) (GetAuthLogoutResponseObject, error)
 	// Exchange authorization code
-	// (GET /auth/sso/{provider}/callback)
-	GetAuthSsoProviderCallback(ctx context.Context, request GetAuthSsoProviderCallbackRequestObject) (GetAuthSsoProviderCallbackResponseObject, error)
+	// (POST /auth/sso/{provider}/callback)
+	PostAuthSsoProviderCallback(ctx context.Context, request PostAuthSsoProviderCallbackRequestObject) (PostAuthSsoProviderCallbackResponseObject, error)
 	// Unlink SSO account from existing account.
 	// (DELETE /auth/sso/{provider}/link)
 	DeleteAuthSsoProviderLink(ctx context.Context, request DeleteAuthSsoProviderLinkRequestObject) (DeleteAuthSsoProviderLinkResponseObject, error)
@@ -1870,18 +1844,26 @@ func (sh *strictHandler) GetAuthLogout(ctx *gin.Context, params GetAuthLogoutPar
 	}
 }
 
-// GetAuthSsoProviderCallback operation middleware
-func (sh *strictHandler) GetAuthSsoProviderCallback(ctx *gin.Context, provider SSOProvider, params GetAuthSsoProviderCallbackParams) {
-	var request GetAuthSsoProviderCallbackRequestObject
+// PostAuthSsoProviderCallback operation middleware
+func (sh *strictHandler) PostAuthSsoProviderCallback(ctx *gin.Context, provider SSOProvider, params PostAuthSsoProviderCallbackParams) {
+	var request PostAuthSsoProviderCallbackRequestObject
 
 	request.Provider = provider
 	request.Params = params
 
+	var body PostAuthSsoProviderCallbackJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		ctx.Status(http.StatusBadRequest)
+		ctx.Error(err)
+		return
+	}
+	request.Body = &body
+
 	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
-		return sh.ssi.GetAuthSsoProviderCallback(ctx, request.(GetAuthSsoProviderCallbackRequestObject))
+		return sh.ssi.PostAuthSsoProviderCallback(ctx, request.(PostAuthSsoProviderCallbackRequestObject))
 	}
 	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GetAuthSsoProviderCallback")
+		handler = middleware(handler, "PostAuthSsoProviderCallback")
 	}
 
 	response, err := handler(ctx, request)
@@ -1889,8 +1871,8 @@ func (sh *strictHandler) GetAuthSsoProviderCallback(ctx *gin.Context, provider S
 	if err != nil {
 		ctx.Error(err)
 		ctx.Status(http.StatusInternalServerError)
-	} else if validResponse, ok := response.(GetAuthSsoProviderCallbackResponseObject); ok {
-		if err := validResponse.VisitGetAuthSsoProviderCallbackResponse(ctx.Writer); err != nil {
+	} else if validResponse, ok := response.(PostAuthSsoProviderCallbackResponseObject); ok {
+		if err := validResponse.VisitPostAuthSsoProviderCallbackResponse(ctx.Writer); err != nil {
 			ctx.Error(err)
 		}
 	} else if response != nil {
@@ -2084,52 +2066,51 @@ func (sh *strictHandler) PatchUserInfo(ctx *gin.Context, params PatchUserInfoPar
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
-	"w22qnSJEAAA=",
+	"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",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file
