@@ -1,6 +1,6 @@
 {
   "name": "q4",
-  "version": "v0.6.0",
+  "version": "v0.6.1",
   "private": true,
   "workspaces": [
     "ui"
@@ -11,7 +11,7 @@
     "gen:all": "npm run gen:api && npm run gen:ui",
     "migrate:dev": "atlas schema apply -c file://models/atlas.hcl --env gorm  --auto-approve",
     "migrate:prod": "atlas migrate apply -c file://models/atlas.hcl --env gorm",
-    "version": "./tools/update-version-number.sh $1 -ui",
-    "build:ci": "./tools/build-and-push.sh $1"
+    "bump": "bash ./tools/update-version-number.sh",
+    "build:ci": "bash ./tools/build-and-push.sh"
   }
 }
