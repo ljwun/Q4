@@ -4,6 +4,7 @@ import { Inter } from 'next/font/google'
 import { Navbar } from '@/app/components/navbar'
 import { Toaster } from "@/components/ui/toaster"
 import { ThemeProvider } from "@/app/components/theme-provider"
+import { UserProvider } from '@/app/components/context/nav-user-context'
 import { PublicEnvScript } from 'next-runtime-env';
 
 const inter = Inter({ subsets: ['latin'] })
@@ -26,16 +27,18 @@ export default function RootLayout({
       <body
         className={inter.className}
       >
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
-          <Navbar />
-          <main>{children}</main>
-          <Toaster />
-        </ThemeProvider>
+        <UserProvider>
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="system"
+            enableSystem
+            disableTransitionOnChange
+          >
+            <Navbar />
+            <main>{children}</main>
+            <Toaster />
+          </ThemeProvider>
+        </UserProvider>
       </body>
     </html>
   );

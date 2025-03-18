@@ -14,7 +14,7 @@ import { useToast } from '@/hooks/use-toast';
 import createClient from "openapi-fetch";
 import { BACKEND_API_BASE_URL } from '@/app/constants'
 import { components, paths, Defined, SSOProvider } from "@/app/openapi";
-import { useUser } from "@/app/components/context/nav-user-context"
+import { useUser, LoginButton } from "@/app/components/context/nav-user-context"
 import { LoginMessage, LoginStatus } from '@/app/components/user/login';
 
 type SSOProviderType = Defined<components["schemas"]["SSOProvider"]>
@@ -57,6 +57,7 @@ export function UserProfileDropdown({ onClose }: UserProfileDropdownProps) {
           title: "載入用戶資料失敗",
           description: "請先登入以繼續。",
           variant: "destructive",
+          action: <LoginButton>登入</LoginButton>
         });
         refreshUserProvider()
         handleClose()
@@ -104,6 +105,7 @@ export function UserProfileDropdown({ onClose }: UserProfileDropdownProps) {
         title: "更新用戶名稱失敗",
         description: "請先登入以繼續。",
         variant: "destructive",
+        action: <LoginButton>登入</LoginButton>
       });
       refreshUserProvider()
       handleClose()
@@ -144,6 +146,7 @@ export function UserProfileDropdown({ onClose }: UserProfileDropdownProps) {
         title: "解除連結失敗",
         description: "請先登入以繼續。",
         variant: "destructive",
+        action: <LoginButton>登入</LoginButton>
       });
       refreshUserProvider()
       handleClose()
