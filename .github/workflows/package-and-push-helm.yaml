@@ -1,0 +1,34 @@
+name: Package and Push Helm chart
+
+on:
+  workflow_call:
+    inputs:
+      path:
+        required: true
+        type: string
+      chart:
+        required: true
+        type: string
+
+jobs:
+  release-helm:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Helm tool installer
+        uses: Azure/setup-helm@v4.3.0
+
+      - name: Login to GitHub Helm Chart Registry
+        run: |
+          echo "${{ secrets.Q4_PACKAGE_PAT }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
+
+      - name: Package and push Helm chart
+        run: |
+          helm package ${{ inputs.path }}
+          helm push *.tgz ${{ inputs.chart }}

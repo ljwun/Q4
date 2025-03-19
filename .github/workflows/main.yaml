@@ -1,0 +1,32 @@
+name: Main Release Workflow
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  release-q4-api:
+    uses: ./.github/workflows/build-and-push-docker.yaml
+    with:
+      dockerfile: .ci/api.Dockerfile
+      image: ghcr.io/ljwun/q4-api
+    secrets: inherit
+
+  release-q4-ui:
+    uses: ./.github/workflows/build-and-push-docker.yaml
+    with:
+      dockerfile: .ci/ui.Dockerfile
+      image: ghcr.io/ljwun/q4-ui
+    secrets: inherit
+
+  release-q4-helm:
+    uses: ./.github/workflows/package-and-push-helm.yaml
+    with:
+      path: .ci/helm
+      chart: oci://ghcr.io/ljwun/helm
+    secrets: inherit
