@@ -48,6 +48,7 @@ jobs:
           context: ${{ inputs.context }}
           file: ${{ inputs.dockerfile }}
           platforms: ${{ inputs.platform }}
+          provenance: false
           push: true
           tags: |
             ${{ inputs.image }}:${{ github.ref_name }}
