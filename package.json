@@ -6,12 +6,26 @@
     "ui"
   ],
   "scripts": {
+    "setup:ui": "cp -u ./ui/.env.example ./ui/.env",
+    "setup:api": "cp -u ./.env.example ./.env",
+    "setup:models": "cp -u ./models/.env.sample ./models/.env",
+    "setup:all": "npm run setup:ui && npm run setup:api && npm run setup:models",
+    "install:ui": "npm ci --legacy-peer-deps",
+    "install:api": "go mod download",
+    "install:all": "concurrently -n ui,api -c green,blue \"npm run install:ui\" \"npm run install:api\"",
+    "start:ui": "dotenv -e ./ui/.env -- npx -w ui next dev",
+    "start:api": "dotenv -e ./.env -- go run .",
+    "start:all": "concurrently -n ui,api -c green,blue \"npm run start:ui\" \"npm run start:api\"",
     "gen:ui": "npm -w ui run gen-api-code",
     "gen:api": "go generate ./tools/oapi-codegen",
     "gen:all": "npm run gen:api && npm run gen:ui",
-    "migrate:dev": "atlas schema apply -c file://models/atlas.hcl --env gorm  --auto-approve",
-    "migrate:prod": "atlas migrate apply -c file://models/atlas.hcl --env gorm",
+    "migrate:dev": "dotenv -e ./models/.env -- atlas schema apply -c file://models/atlas.hcl --env gorm  --auto-approve",
+    "migrate:prod": "dotenv -e ./models/.env -- atlas migrate apply -c file://models/atlas.hcl --env gorm",
     "bump": "bash ./tools/update-version-number.sh",
     "build:ci": "bash ./tools/build-and-push.sh"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "dotenv-cli": "^8.0.0"
   }
 }
