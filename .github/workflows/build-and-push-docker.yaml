@@ -4,9 +4,8 @@ on:
   workflow_call:
     inputs:
       platform:
-        required: false
+        required: true
         type: string
-        default: "linux/arm64"
       context:
         required: false
         default: "."
@@ -43,7 +42,7 @@ jobs:
           password: ${{ secrets.Q4_PACKAGE_PAT }}
 
       - name: Build and push image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ${{ inputs.context }}
           file: ${{ inputs.dockerfile }}

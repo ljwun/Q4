@@ -13,6 +13,7 @@ jobs:
   release-q4-api:
     uses: ./.github/workflows/build-and-push-docker.yaml
     with:
+      platform: linux/amd64,linux/arm64
       dockerfile: .ci/api.Dockerfile
       image: ghcr.io/ljwun/q4-api
     secrets: inherit
@@ -20,6 +21,7 @@ jobs:
   release-q4-ui:
     uses: ./.github/workflows/build-and-push-docker.yaml
     with:
+      platform: linux/amd64,linux/arm64
       dockerfile: .ci/ui.Dockerfile
       image: ghcr.io/ljwun/q4-ui
     secrets: inherit
