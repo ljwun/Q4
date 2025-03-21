@@ -20,6 +20,7 @@
 
 ## Change Log
 
+- v0.7.0 🔄取消出價鎖和兩次的出價嘗試，改成傳入參考值做為預設的當前最高價，避免第二次出價嘗試
 - v0.6.1 🐛修正未登入的提示訊息造成 UI 錯誤的問題
 - v0.6.0 🆕支援多平台的 SSO 登入，以及基本的用戶管理功能
 - v0.5.0 🆕紀錄並限制使用者上傳圖片的頻率
@@ -245,9 +246,59 @@ redis-cli XGROUP CREATE q4-shared-bid-stream q4-bid-group 0 MKSTREAM
 
 ## Mechanism
 
-### Bidding (待補)
+出價功能最初是透過[類似樂觀鎖的做法](https://github.com/ljwun/Q4/blob/20737a3ec418a20c59469ae40bb03a2fc6355e67/api/server.go#L259)來實現出價的功能，後來則是考慮極端流量的情況，以及出價紀錄的順序問題，進一步改成目前的 Redis 同步比價、Redis Stream 異步紀錄到資料庫的方案。
 
-### Bid Synchronous (待補)
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant S as Server
+    participant R as Redis
+    participant W as Worker
+    participant D as Database
+
+    C->>+S: Place bid
+    break Invalid Access Token
+        S-->>C: Response with error
+    end
+    S->>+D: Retrieve auction Info
+    Note right of D: Query by index id
+    D-->>-S: Return auction info
+    break Invalid Auction
+        S-->>C: Response with error
+    end
+    S->>+R: Execute Lua Script
+    Note right of R: Use Lua Script to keep operation atomic
+    R->>R: Find current bid of specified auction
+    alt bid <= current_bid
+        R-->>S: Response 0
+    else
+        R->>R: Add record into Stream
+        R-->>-S: Response 1
+    end
+    alt Bid too low
+        S-->>C: Response with error
+    else Bid accepted
+        S-->>-C: Response with success code
+    end
+
+    Note right of W: Async Persistence Process
+    loop Continuous Processing
+        R-->+W: Bid info (abstract flow)
+        activate W
+        W->>D: Retrieve auction Info
+        D-->W: Auction info
+        alt bid > current_bit
+            W->>D: Insert record
+            W->>D: Update auction info
+        end
+        deactivate W
+    end
+```
+
+在接收到出價請求後，系統會依序先驗證**身分**和**現在是否可出價**，接下來透過 Lua Script 交由 Redis 利用 Redis 上的最高出價紀錄來跟使用者的出價金額進行比較，成功的出價會進一步被寫入 Redis Stream 中並返回，系統接著根據 Lua Script 的結果回應給客戶端，到此使用者的出價行為就完成了。
+
+Redis Stream 的出價資料則會由系統以異步的方式寫回資料庫，考慮到分布式部屬的情況會有多個實例，以及負責處理的實例意外下線的情況，引入分布式鎖來決定每次交由哪個實例來進行處理，同時在取得鎖後先讀取 PENDING 狀態的資料，確保因為前一個處理的實例下線時沒有完成同步的出價紀錄也能再次進行同步，確保順序性和完整性，這部分也就是上面循序圖的**13**。
 
 ## License
 
