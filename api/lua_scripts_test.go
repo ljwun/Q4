@@ -48,40 +48,44 @@ func TestBidScript(t *testing.T) {
 	}
 
 	tests := []struct {
-		name        string
-		setupFunc   func()
-		itemKey     string
-		streamKey   string
-		bidAmount   string
-		bidInfo     BidInfo
-		expireTime  string
-		want        int
-		checkStream bool
+		name          string
+		setupFunc     func()
+		itemKey       string
+		streamKey     string
+		bidAmount     string
+		bidInfo       BidInfo
+		expireTime    string
+		defaultMaxBid string
+		want          int
+		checkStream   bool
 	}{
 		{
-			name:      "商品不存在時應返回-1",
-			setupFunc: func() {},
-			itemKey:   "item:nonexistent",
-			streamKey: "stream:bids",
-			bidAmount: "100",
+			name:          "商品不存在時應使用預設最高競價",
+			setupFunc:     func() {},
+			itemKey:       "item:nonexistent",
+			streamKey:     "stream:bids",
+			bidAmount:     "200",
+			defaultMaxBid: "100",
+			expireTime:    "3600",
 			bidInfo: BidInfo{
 				ItemID:    itemID,
 				User:      user,
-				Amount:    100,
+				Amount:    200,
 				CreatedAt: now,
 			},
-			expireTime: "3600",
-			want:       -1,
+			want:        1,
+			checkStream: true,
 		},
 		{
 			name: "出價金額不足時應返回0",
 			setupFunc: func() {
 				mr.Set("item:1", "200")
 			},
-			itemKey:    "item:1",
-			streamKey:  "stream:bids",
-			bidAmount:  "100",
-			expireTime: "3600",
+			itemKey:       "item:1",
+			streamKey:     "stream:bids",
+			bidAmount:     "100",
+			defaultMaxBid: "50",
+			expireTime:    "3600",
 			bidInfo: BidInfo{
 				ItemID:    itemID,
 				User:      user,
@@ -95,10 +99,11 @@ func TestBidScript(t *testing.T) {
 			setupFunc: func() {
 				mr.Set("item:1", "100")
 			},
-			itemKey:    "item:1",
-			streamKey:  "stream:bids",
-			bidAmount:  "200",
-			expireTime: "3600",
+			itemKey:       "item:1",
+			streamKey:     "stream:bids",
+			bidAmount:     "200",
+			defaultMaxBid: "50",
+			expireTime:    "3600",
 			bidInfo: BidInfo{
 				ItemID:    itemID,
 				User:      user,
@@ -126,7 +131,7 @@ func TestBidScript(t *testing.T) {
 			// 執行腳本
 			result, err := BidScript.Run(ctx, client,
 				[]string{tt.itemKey, tt.streamKey},
-				tt.bidAmount, bidInfo, tt.expireTime,
+				tt.bidAmount, bidInfo, tt.expireTime, tt.defaultMaxBid,
 			).Int()
 
 			// 驗證結果

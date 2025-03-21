@@ -183,6 +183,7 @@ func (impl *ServerImpl) Start() {
 				logger.Debug("Receive message")
 				handle := func() error {
 					// 更新最高出價
+					// NOTE: 參考 PostAuctionItemItemIDBids 的實現邏輯，為了避免低機率的邊界條件造成的低金額出價問題，同步出價資料庫時需要再次檢查最高出價金額。
 					record := models.Bid{
 						UserID:        msg.Data.User.ID,
 						Amount:        msg.Data.Amount,
@@ -192,6 +193,7 @@ func (impl *ServerImpl) Start() {
 					if result := impl.db.Preload("CurrentBid.User").First(&auction); result.Error != nil {
 						return fmt.Errorf("fail to find auction item, err=%w", result.Error)
 					}
+					// NOTE: 參考 redisAdapter.GroupConsumer 的 StrictOrder 設計，同一時間只會有一個 server 來進行處理，所以這裡不需要擔心競爭條件
 					var currentBid uint32
 					if auction.CurrentBid != nil {
 						currentBid = auction.CurrentBid.Amount
@@ -375,21 +377,6 @@ func (impl *ServerImpl) PostAuctionItemItemIDBids(ctx context.Context, request o
 		slog.Error("Fail to parse and validate JWT", slog.String("op", op), slog.Any("error", err))
 		return openapi.PostAuctionItemItemIDBids401Response{}, nil
 	}
-
-	// 取得Redis上商品的出價鎖
-	lockKey := fmt.Sprintf("%sauction:%s:lock", impl.config.Redis.KeyPrefix, request.ItemID)
-	dMutex := redisAdapter.NewAutoRenewMutex(impl.redisClient, lockKey)
-	lockCtx, err := dMutex.Lock(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("[%s] Fail to acquire bid lock, err=%w", op, err)
-	}
-	defer func() {
-		_, err := dMutex.Unlock()
-		if err != nil {
-			slog.Warn("[%s] Fail to release bid lock, err=%w", op, err)
-		}
-	}()
-
 	// 準備出價資訊
 	auctionKey := fmt.Sprintf("%sauction:%s", impl.config.Redis.KeyPrefix, request.ItemID)
 	bidInfo := BidInfo{
@@ -407,34 +394,14 @@ func (impl *ServerImpl) PostAuctionItemItemIDBids(ctx context.Context, request o
 	}
 	bidInfoBase64 := base64.StdEncoding.EncodeToString(bidInfoBytes)
 	expireTime := impl.config.Redis.ExpireTime.Seconds()
-	// 透過Lua script來處理出價
-	status, err := BidScript.Run(lockCtx, impl.redisClient, []string{auctionKey, impl.config.Redis.StreamKeys.BidStream}, request.Body.Bid, bidInfoBase64, expireTime).Int()
-	if err != nil {
-		return nil, fmt.Errorf("[%s] Fail to place bid, err=%w", op, err)
-	}
-	if status == 0 {
-		return openapi.PostAuctionItemItemIDBids400JSONResponse{}, nil
-	} else if status == 1 {
-		slog.Info("Higher bid occurs", slog.String("user", token.Subject), slog.Int64("bid", int64(request.Body.Bid)), slog.String("auctionID", auction.ID.String()))
-		return openapi.PostAuctionItemItemIDBids200Response{}, nil
-	} else if status != -1 {
-		return nil, fmt.Errorf("[%s] Invalid script return value: %d", op, status)
-	}
-
-	// 將資料庫紀錄的最高出價寫入Redis
-	// NOTE: 由於每次出價都一定會更新Redis，所以除非從請求剛進來時系統向資料庫請求拍賣資訊，
-	//       到取得鎖的過程中，拍賣物品的最高出價已經被其他人更新，且Redis的資料也過期，不然
-	//       請求剛進來時系統向資料庫請求拍賣資訊都能確定是最新的。
-	currentBid := auction.StartingPrice
+	dbCurrentBid := auction.StartingPrice
 	if auction.CurrentBidID != nil {
-		currentBid = auction.CurrentBid.Amount
+		dbCurrentBid = auction.CurrentBid.Amount
 	}
-	if err := impl.redisClient.Set(lockCtx, auctionKey, currentBid, impl.config.Redis.ExpireTime).Err(); err != nil {
-		return nil, fmt.Errorf("[%s] Fail to update current bid in Redis, err=%w", op, err)
-	}
-
-	// 再次透過Lua script來處理出價
-	status, err = BidScript.Run(lockCtx, impl.redisClient, []string{auctionKey, impl.config.Redis.StreamKeys.BidStream}, request.Body.Bid, bidInfoBase64, expireTime).Int()
+	// 透過Lua script來處理出價
+	// NOTE: 由於資料庫的出價紀錄是異步更新的，所以 dbCurrentBid 只是一個參考值，實際上的最高出價金額可能會比這個值更高，只是還在 Redis Stream 中等待同步。
+	//       為了盡量避免使用這個參考值來處理，需要指定一個較大的過期時間，同時在同步出價紀錄到資料庫時再次檢查最高出價金額，確保記錄到資料庫的出價紀錄是正確的。
+	status, err := BidScript.Run(ctx, impl.redisClient, []string{auctionKey, impl.config.Redis.StreamKeys.BidStream}, request.Body.Bid, bidInfoBase64, expireTime, dbCurrentBid).Int()
 	if err != nil {
 		return nil, fmt.Errorf("[%s] Fail to place bid, err=%w", op, err)
 	}
@@ -443,10 +410,8 @@ func (impl *ServerImpl) PostAuctionItemItemIDBids(ctx context.Context, request o
 	} else if status == 1 {
 		slog.Info("Higher bid occurs", slog.String("user", token.Subject), slog.Int64("bid", int64(request.Body.Bid)), slog.String("auctionID", auction.ID.String()))
 		return openapi.PostAuctionItemItemIDBids200Response{}, nil
-	} else if status != -1 {
-		return nil, fmt.Errorf("[%s] Invalid script return value: %d", op, status)
 	}
-	return nil, fmt.Errorf("[%s] Impossible case occurs: %d", op, status)
+	return nil, fmt.Errorf("[%s] Invalid script return value: %d", op, status)
 }
 
 // Track auction item events
