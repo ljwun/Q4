@@ -206,6 +206,43 @@ redis-cli XGROUP CREATE q4-shared-bid-stream q4-bid-group 0 MKSTREAM
     npm run start:all
     ```
 
+### Vscode Debug
+
+1. 下載專案
+
+    ```bash
+    git clone --depth 1 --branch <version> https://github.com/ljwun/Q4.git
+    cd ./Q4
+    ```
+
+2. 安裝依賴
+
+    ```bash
+    npm run install:all
+    ```
+
+3. 準備設定檔
+
+    :bulb: 以下指令會產生三個預設設定檔 `./.env`  `./ui/.env`  `./models/.env`
+
+    ```bash
+    npm run setup:all
+    ```
+
+4. 修改設定檔 `./.env` 和 `./ui/.env`
+
+5. 使用 VSCode 開啟專案
+
+    ```bash
+    code .
+    ```
+
+6. 在 VSCode 中按下 `Ctrl+Shift+D` 或點選左側 `Run and Debug` 圖示
+
+7. 在下拉選單中選擇 `Server 1`，然後點選開始按鈕執行
+
+    :bulb: 啟動後可以在 Debug Console 中看到 `api server 1` 和 `ui server 1` 的 log
+
 ## Mechanism
 
 ### Bidding (待補)
