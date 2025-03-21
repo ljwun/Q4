@@ -350,6 +350,17 @@ func (impl *ServerImpl) GetAuctionItemItemID(ctx context.Context, request openap
 // (POST /auction/item/{itemID}/bids)
 func (impl *ServerImpl) PostAuctionItemItemIDBids(ctx context.Context, request openapi.PostAuctionItemItemIDBidsRequestObject) (openapi.PostAuctionItemItemIDBidsResponseObject, error) {
 	const op = "PostAuctionItemItemIDBids"
+	// 檢查使用者是否可以出價
+	//  - 檢查是否有提供access token
+	if request.Params.AccessToken == nil {
+		return openapi.PostAuctionItemItemIDBids401Response{}, nil
+	}
+	//  - 解析並驗證access token
+	token, err := openapi.ParseAndValidateJWT(*request.Params.AccessToken, impl.config.Auth.PrivateKey)
+	if err != nil {
+		slog.Error("Fail to parse and validate JWT", slog.String("op", op), slog.Any("error", err))
+		return openapi.PostAuctionItemItemIDBids401Response{}, nil
+	}
 	// 檢查拍賣物品是否存在
 	auction := models.AuctionItem{ID: request.ItemID}
 	if result := impl.db.Preload("CurrentBid.User").First(&auction); result.Error != nil {
@@ -365,17 +376,6 @@ func (impl *ServerImpl) PostAuctionItemItemIDBids(ctx context.Context, request o
 	// 檢查拍賣物品是否已經結束
 	if time.Now().After(auction.EndTime) {
 		return openapi.PostAuctionItemItemIDBids410JSONResponse{}, nil
-	}
-	// 檢查使用者是否可以出價
-	//  - 檢查是否有提供access token
-	if request.Params.AccessToken == nil {
-		return openapi.PostAuctionItemItemIDBids401Response{}, nil
-	}
-	//  - 解析並驗證access token
-	token, err := openapi.ParseAndValidateJWT(*request.Params.AccessToken, impl.config.Auth.PrivateKey)
-	if err != nil {
-		slog.Error("Fail to parse and validate JWT", slog.String("op", op), slog.Any("error", err))
-		return openapi.PostAuctionItemItemIDBids401Response{}, nil
 	}
 	// 準備出價資訊
 	auctionKey := fmt.Sprintf("%sauction:%s", impl.config.Redis.KeyPrefix, request.ItemID)
