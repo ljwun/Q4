@@ -1,6 +1,6 @@
 # Q4
 
-[![Tag](https://img.shields.io/github/v/tag/ljwun/q4?label=latest)](https://github.com/GreptimeTeam/greptimedb/releases/latest) ![GoVersion](https://img.shields.io/github/go-mod/go-version/ljwun/q4) ![NextJSVersion](https://img.shields.io/github/package-json/dependency-version/ljwun/q4/next?filename=ui/package.json) ![License](https://img.shields.io/github/license/ljwun/q4)
+![Tag](https://img.shields.io/github/v/tag/ljwun/q4?label=latest) ![GoVersion](https://img.shields.io/github/go-mod/go-version/ljwun/q4) ![NextJSVersion](https://img.shields.io/github/package-json/dependency-version/ljwun/q4/next?filename=ui/package.json) ![License](https://img.shields.io/github/license/ljwun/q4)
 
 專案的預設目標是分佈式拍賣系統，目的是展示**資料的兢爭處理**和**分佈式架構設計**。
 
